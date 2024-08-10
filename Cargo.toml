@@ -3,4 +3,11 @@ name = "fsst-rs"
 version = "0.1.0"
 edition = "2021"
 
-[dependencies]
+[dev-dependencies]
+criterion = "0.5"
+lz4 = "1"
+
+[[bench]]
+name = "compress"
+harness = false
+bench = true
