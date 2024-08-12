@@ -4,10 +4,11 @@ permissions:
   pull-requests: write
   contents: write
 
-on:
-  push:
-    branches:
-      - develop
+# TODO(aduffy): uncomment when we're ready to publish
+on: {}
+  #   push:
+  #     branches:
+  #       - develop
 
 jobs:
   release-plz:
