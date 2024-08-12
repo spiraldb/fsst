@@ -50,6 +50,8 @@ jobs:
         run: cargo build --all-features --all-targets
       - name: Rust Lint - Format
         run: cargo fmt --all --check
+      - name: Rust docs
+        run: cargo doc --no-deps
       - name: Rust Lint - Clippy
         run: cargo clippy --all-features --all-targets
       - name: Rust Test

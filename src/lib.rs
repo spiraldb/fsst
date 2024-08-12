@@ -160,7 +160,7 @@ impl Code {
 /// assert_eq!(compressed, vec![0u8]);
 /// ```
 ///
-/// training: [`train`]
+/// [training]: [`train`]
 #[derive(Clone, Debug)]
 pub struct SymbolTable {
     /// Table mapping codes to symbols.
@@ -208,24 +208,21 @@ impl SymbolTable {
         self.n_symbols += 1;
     }
 
-    /// Return a new encoded sequence of data bytes instead.
+    /// Use the symbol table to compress the plaintext into a sequence of codes and escapes.
     pub fn compress(&self, plaintext: &[u8]) -> Vec<u8> {
         let mut values = Vec::with_capacity(2 * plaintext.len());
         let len = plaintext.len();
         let mut pos = 0;
         while pos < len {
-            // println!("COMPRESS pos={pos} len={len} in_progress_size={}", values.len());
             let next_code = self.find_longest_symbol(&plaintext[pos..len]);
             if next_code.is_escape() {
                 // Case 1 -escape: push an ESCAPE followed by the next byte.
-                // println!("ESCAPE");
                 values.push(Code::ESCAPE_CODE);
                 values.push(next_code.0 as u8);
                 pos += 1;
             } else {
                 // Case 2 - code: push the code, increment position by symbol length
                 let symbol = self.symbols[next_code.0 as usize];
-                // println!("APPEND symbol={:?} len={}", symbol.as_slice(), symbol.len());
                 values.push(next_code.0 as u8);
                 pos += symbol.len();
             }
@@ -234,7 +231,7 @@ impl SymbolTable {
         values
     }
 
-    /// Decompress the provided byte slice into a [`String`] using the symbol table.
+    /// Decompress a byte slice that was previously returned by [compression][Self::compress].
     pub fn decompress(&self, compressed: &[u8]) -> Vec<u8> {
         let mut decoded: Vec<u8> = Vec::with_capacity(size_of::<Symbol>() * compressed.len());
         let ptr = decoded.as_mut_ptr();
