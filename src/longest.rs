@@ -11,10 +11,9 @@ impl SymbolTable {
         // Find the code that best maps to the provided text table here.
         let mut best_code = Code::new_escaped(text[0]);
         let mut best_overlap = 1;
-        for code in 0..512 {
+        for code in 0..511 {
             let symbol = &self.symbols[code as usize];
             if symbol.is_prefix(text) && symbol.len() > best_overlap {
-                // println!("using ideal code: code={code} symbol{:?} len={}", symbol.as_slice(), symbol.len());
                 best_code = Code::from_u16(code);
                 best_overlap = symbol.len();
             }

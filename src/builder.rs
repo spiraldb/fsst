@@ -21,8 +21,8 @@ struct Counter {
 impl Counter {
     fn new() -> Self {
         Self {
-            counts1: vec![0; 512],
-            counts2: vec![vec![0; 512]; 512],
+            counts1: vec![0; 511],
+            counts2: vec![vec![0; 511]; 511],
         }
     }
 
@@ -47,8 +47,20 @@ impl Counter {
     }
 }
 
+/// The number of generations used for training. This is taken from the [FSST paper].
+///
+/// [FSST paper]: https://www.vldb.org/pvldb/vol13/p2649-boncz.pdf
 pub const MAX_GENERATIONS: usize = 5;
 
+/// Build and train a `SymbolTable` from a sample corpus of text.
+///
+/// This function implements the generational algorithm described in the [FSST paper] Section
+/// 4.3. Starting with an empty symbol table, it iteratively compresses the corpus, then attempts
+/// to merge symbols when doing so would yield better compression than leaving them unmerged. The
+/// resulting table will have at most 255 symbols (the 256th symbol is reserved for the escape
+/// code).
+///
+/// [FSST paper]: https://www.vldb.org/pvldb/vol13/p2649-boncz.pdf
 pub fn train(corpus: impl AsRef<[u8]>) -> SymbolTable {
     let mut table = SymbolTable::default();
     // TODO(aduffy): handle truncating/sampling if corpus > requires sample size.
@@ -87,7 +99,7 @@ impl SymbolTable {
     fn optimize(&self, counters: Counter) -> Self {
         let mut res = SymbolTable::default();
         let mut pqueue = BinaryHeap::new();
-        for code1 in 0..512 {
+        for code1 in 0..511 {
             let code1 = Code::from_u16(code1);
             let symbol1 = self.symbols[code1.0 as usize];
             let gain = counters.count1(code1) * symbol1.len();
@@ -96,7 +108,7 @@ impl SymbolTable {
                 gain,
             });
 
-            for code2 in 0..512 {
+            for code2 in 0..511 {
                 let code2 = Code::from_u16(code2);
                 let symbol2 = &self.symbols[code2.0 as usize];
                 // If either symbol is zero-length, or if merging would yield a symbol of
@@ -130,6 +142,9 @@ impl SymbolTable {
     }
 }
 
+/// A candidate for inclusion in a symbol table.
+///
+/// This is really only useful for the `optimize` step of training.
 struct Candidate {
     gain: usize,
     symbol: Symbol,
@@ -166,7 +181,7 @@ impl Ord for Candidate {
 
 #[cfg(test)]
 mod test {
-    use crate::{train, SymbolTable};
+    use crate::{train, Code};
 
     #[test]
     fn test_builder() {
@@ -178,24 +193,24 @@ mod test {
         let compressed = table.compress(text.as_bytes());
 
         // Ensure that the compressed string has no escape bytes
-        assert!(compressed.iter().all(|b| *b != SymbolTable::ESCAPE));
+        assert!(compressed.iter().all(|b| *b != Code::ESCAPE_CODE));
 
         // Ensure that we can compress a string with no values seen at training time.
         let compressed = table.compress("xyz123".as_bytes());
         assert_eq!(
             compressed,
             vec![
-                SymbolTable::ESCAPE,
+                Code::ESCAPE_CODE,
                 b'x',
-                SymbolTable::ESCAPE,
+                Code::ESCAPE_CODE,
                 b'y',
-                SymbolTable::ESCAPE,
+                Code::ESCAPE_CODE,
                 b'z',
-                SymbolTable::ESCAPE,
+                Code::ESCAPE_CODE,
                 b'1',
-                SymbolTable::ESCAPE,
+                Code::ESCAPE_CODE,
                 b'2',
-                SymbolTable::ESCAPE,
+                Code::ESCAPE_CODE,
                 b'3',
             ]
         )

@@ -1,10 +1,16 @@
+//! Compression benchmark.
+//!
+//! Contains benchmarks for FSST compression, decompression, and symbol table training.
+//!
+//! Also contains LZ4 baseline.
+#![allow(missing_docs)]
 use std::io::{Cursor, Read, Write};
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use lz4::liblz4::BlockChecksum;
 use lz4::{BlockSize, ContentChecksum};
 
-use fsst_rs::{train, SymbolTable};
+use fsst_rs::{train, Code};
 
 const CORPUS: &str = include_str!("dracula.txt");
 const TEST: &str = "I found my smattering of German very useful here";
@@ -22,7 +28,7 @@ fn bench_fsst(c: &mut Criterion) {
     let compressed = table.compress(plaintext);
     let escape_count = compressed
         .iter()
-        .filter(|b| **b == SymbolTable::ESCAPE)
+        .filter(|b| **b == Code::ESCAPE_CODE)
         .count();
     let ratio = (plaintext.len() as f64) / (compressed.len() as f64);
     println!(

@@ -1,11 +1,19 @@
+//! A pure-Rust, zero-dependency implementation of the [FSST string compression algorithm][whitepaper].
+//!
+//! FSST is a string compression algorithm meant for use in database systems. It was designed by
+//! [Peter Boncz, Thomas Neumann, and Viktor Leis][whitepaper]. It provides 1-3GB/sec compression
+//! and decompression of strings at compression rates competitive with or better than LZ4.
+//!
+//! NOTE: This  current implementation is still in-progress, please use at your own risk.
+//!
+//! [whitepaper]: https://www.vldb.org/pvldb/vol13/p2649-boncz.pdf
+
 use std::fmt::{Debug, Formatter};
 
 pub use builder::*;
 
 mod builder;
 mod longest;
-
-pub const ESCAPE: u8 = 0xFF;
 
 /// A Symbol wraps a set of values of
 #[derive(Copy, Clone)]
@@ -21,8 +29,10 @@ impl Debug for Symbol {
 }
 
 impl Symbol {
+    /// Zero value for `Symbol`.
     pub const ZERO: Self = Self::zero();
 
+    /// Constructor for a `Symbol` from an 8-element byte slice.
     pub fn from_slice(slice: &[u8; 8]) -> Self {
         Self { bytes: *slice }
     }
@@ -53,36 +63,18 @@ impl Symbol {
         size_of::<Self>() - null_bytes
     }
 
+    /// Returns true if the symbol does not encode any bytes.
+    ///
+    /// Note that this should only be true for the zero code.
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
+    /// Create a ew
     pub fn as_slice(&self) -> &[u8] {
         let len = self.len();
-        // Safety: the length from `len()` can never be more than 8.
+        // SAFETY: constructors will not allow building a struct where len > 8.
         unsafe { &self.bytes[0..len] }
-    }
-
-    pub fn append_to(&self, vec: &mut Vec<u8>) {
-        match self.len() {
-            0 => self.append_inner::<0>(vec),
-            1 => self.append_inner::<1>(vec),
-            2 => self.append_inner::<2>(vec),
-            3 => self.append_inner::<3>(vec),
-            4 => self.append_inner::<4>(vec),
-            5 => self.append_inner::<5>(vec),
-            6 => self.append_inner::<6>(vec),
-            7 => self.append_inner::<7>(vec),
-            8 => self.append_inner::<8>(vec),
-            _ => unreachable!("Symbol::len() always ≤ 8"),
-        }
-    }
-
-    fn append_inner<const N: usize>(&self, vec: &mut Vec<u8>) {
-        for i in 0..N {
-            let byte: u8 = unsafe { self.num >> i } as u8;
-            vec.push(byte);
-        }
     }
 
     /// Returns true if the symbol is a prefix of the provided text.
@@ -90,6 +82,7 @@ impl Symbol {
         text.starts_with(self.as_slice())
     }
 
+    /// Return a new `Symbol` by logically concatenating ourselves with another `Symbol`.
     pub fn concat(&self, other: &Self) -> Self {
         let new_len = self.len() + other.len();
         assert!(new_len <= 8, "cannot build symbol with length > 8");
@@ -102,12 +95,30 @@ impl Symbol {
     }
 }
 
-/// Codes correspond to bytes.
+/// Codes used to map symbols to bytes.
+///
+/// Logically, codes can range from 0-255 inclusive. Physically, we represent them as a 9-bit
+/// value packed into a `u16`.
+///
+/// Physically in-memory, `Code(0)` through `Code(255)` corresponds to escape sequences of raw bytes
+/// 0 through 255. `Code(256)` through `Code(511)` represent the actual codes -255.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Code(u16);
 
 impl Code {
+    /// Maximum code value for the in-memory `Code` representation.
     pub const CODE_MAX: u16 = 512;
+
+    /// Maximum code value. Code 255 is reserved as the [escape code][`Self::ESCAPE_CODE`].
+    pub const MAX_CODE: u8 = 254;
+
+    /// Code used to indicate bytes that are not in the symbol table.
+    ///
+    /// When compressing a string that cannot fully be expressed with the symbol table, the compressed
+    /// output will contain an `ESCAPE` byte followed by a raw byte. At decompression time, the presence
+    /// of `ESCAPE` indicates that the next byte should be appended directly to the result instead of
+    /// being looked up in the symbol table.
+    pub const ESCAPE_CODE: u8 = 255;
 
     /// Create a new code representing an escape byte.
     pub fn new_escaped(byte: u8) -> Self {
@@ -116,6 +127,12 @@ impl Code {
 
     /// Create a new code representing a symbol.
     pub fn new_symbol(code: u8) -> Self {
+        assert_ne!(
+            code,
+            Code::ESCAPE_CODE,
+            "code {code} cannot be used for symbol, reserved for ESCAPE"
+        );
+
         Self((code as u16) + 256)
     }
 
@@ -136,10 +153,27 @@ impl Code {
     }
 }
 
+/// The static symbol table used for compression and decompression.
+///
+/// The `SymbolTable` is the central component of FSST. You can create a SymbolTable either by
+/// default, or by [training] it on an input corpus of text.
+///
+/// Example usage:
+///
+/// ```
+/// use fsst_rs::{Symbol, SymbolTable};
+/// let mut table = SymbolTable::default();
+/// table.insert(Symbol::from_slice(&[b'h', b'e', b'l', b'l', b'o', 0, 0, 0]));
+///
+/// let compressed = table.compress("hello".as_bytes());
+/// assert_eq!(compressed, vec![0u8]);
+/// ```
+///
+/// training: [`train`]
 #[derive(Clone, Debug)]
 pub struct SymbolTable {
     /// Table mapping codes to symbols.
-    pub(crate) symbols: [Symbol; 512],
+    pub(crate) symbols: [Symbol; 511],
 
     /// Indicates the number of entries in the symbol table that have been populated.
     ///
@@ -151,7 +185,7 @@ pub struct SymbolTable {
 impl Default for SymbolTable {
     fn default() -> Self {
         let mut table = Self {
-            symbols: [Symbol::ZERO; 512],
+            symbols: [Symbol::ZERO; 511],
             n_symbols: 0,
         };
 
@@ -170,14 +204,15 @@ impl Default for SymbolTable {
 /// The symbol table is trained on a corpus of data in the form of a single byte array, building up
 /// a mapping of 1-byte "codes" to sequences of up to `N` plaintext bytse, or "symbols".
 impl SymbolTable {
-    pub const ESCAPE: u8 = 255;
-
     /// Insert a new symbol at the end of the table.
     ///
     /// # Panics
     /// Panics if the table is already full.
     pub fn insert(&mut self, symbol: Symbol) {
-        assert!(self.n_symbols < 512, "cannot insert into full symbol table");
+        assert!(
+            self.n_symbols < self.symbols.len(),
+            "cannot insert into full symbol table"
+        );
         self.symbols[self.n_symbols] = symbol;
         self.n_symbols += 1;
     }
@@ -193,7 +228,7 @@ impl SymbolTable {
             if next_code.is_escape() {
                 // Case 1 -escape: push an ESCAPE followed by the next byte.
                 // println!("ESCAPE");
-                values.push(Self::ESCAPE);
+                values.push(Code::ESCAPE_CODE);
                 values.push(next_code.0 as u8);
                 pos += 1;
             } else {
@@ -218,7 +253,7 @@ impl SymbolTable {
 
         while in_pos < compressed.len() && out_pos < (decoded.capacity() + size_of::<Symbol>()) {
             let code = compressed[in_pos];
-            if code == SymbolTable::ESCAPE {
+            if code == Code::ESCAPE_CODE {
                 // Advance by one, do raw write.
                 in_pos += 1;
                 // SAFETY: out_pos is always 8 bytes or more from the end of decoded buffer
