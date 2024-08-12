@@ -98,10 +98,9 @@ pub struct Code(u16);
 
 impl Code {
     /// Maximum code value for the in-memory `Code` representation.
-    pub const CODE_MAX: u16 = 512;
-
-    /// Maximum code value. Code 255 is reserved as the [escape code][`Self::ESCAPE_CODE`].
-    pub const MAX_CODE: u8 = 254;
+    ///
+    /// When truncated to u8 this is code 255, which is equivalent to [`Self::ESCAPE_CODE`].
+    pub const CODE_MAX: u16 = 511;
 
     /// Code used to indicate bytes that are not in the symbol table.
     ///

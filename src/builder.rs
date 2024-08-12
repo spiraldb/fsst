@@ -21,8 +21,8 @@ struct Counter {
 impl Counter {
     fn new() -> Self {
         Self {
-            counts1: vec![0; 511],
-            counts2: vec![vec![0; 511]; 511],
+            counts1: vec![0; Code::CODE_MAX as usize],
+            counts2: vec![vec![0; Code::CODE_MAX as usize]; Code::CODE_MAX as usize],
         }
     }
 
