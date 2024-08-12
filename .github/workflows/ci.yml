@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [ "develop" ]
+  pull_request: { }
+  workflow_dispatch: { }
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  build:
+    name: 'build'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust Version
+        id: rust-version
+        shell: bash
+        run: echo "version=$(cat rust-toolchain.toml | grep channel | awk -F'\"' '{print $2}')" >> $GITHUB_OUTPUT
+
+      - name: Rust Toolchain
+        id: rust-toolchain
+        uses: dtolnay/rust-toolchain@master
+        if: steps.rustup-cache.outputs.cache-hit != 'true'
+        with:
+          toolchain: "${{ steps.rust-version.outputs.version }}"
+          components: clippy, rustfmt
+
+      - name: Rust Dependency Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/develop' }}
+          shared-key: "shared" # To allow reuse across jobs
+
+      - name: Rust Compile Cache
+        uses: mozilla-actions/sccache-action@v0.0.5
+      - name: Rust Compile Cache Config
+        shell: bash
+        # echo "CARGO_LOG=cargo::core::compiler::fingerprint=info" >> $GITHUB_ENV
+        run: |
+          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
+          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+          echo "CARGO_INCREMENTAL=0" >> $GITHUB_ENV
+
+      - name: Rust Build
+        run: cargo build --all-features --all-targets
+      - name: Rust Lint - Format
+        run: cargo fmt --all --check
+      - name: Rust Lint - Clippy
+        run: cargo clippy --all-features --all-targets
+      - name: Rust Test
+        run: cargo test --workspace --all-features
