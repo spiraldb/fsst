@@ -12,14 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::find_longest::FindLongestSymbol;
 use crate::{Code, SymbolTable};
 
 /// Find the longest substring.
 
-impl SymbolTable {
+impl FindLongestSymbol for SymbolTable {
     // NOTE(aduffy): if you don't disable inlining, this function won't show up in profiles.
     #[inline(never)]
-    pub(crate) fn find_longest_symbol(&self, text: &[u8]) -> Code {
+    fn find_longest_symbol(&self, text: &[u8]) -> Code {
         debug_assert!(!text.is_empty(), "text must not be empty");
 
         // Find the code that best maps to the provided text table here.

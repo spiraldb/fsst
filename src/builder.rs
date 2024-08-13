@@ -21,6 +21,7 @@
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
+use crate::find_longest::FindLongestSymbol;
 use crate::{Code, Symbol, SymbolTable};
 
 #[derive(Debug, Clone)]
@@ -147,10 +148,13 @@ impl SymbolTable {
         }
 
         // Pop the 255 best symbols.
-        pqueue
-            .iter()
-            .take(255)
-            .for_each(|candidate| res.insert(candidate.symbol));
+        let mut n_symbols = 0;
+        while !pqueue.is_empty() && n_symbols < 255 {
+            let candidate = pqueue.pop().unwrap();
+            if res.insert(candidate.symbol) {
+                n_symbols += 1;
+            }
+        }
 
         res
     }

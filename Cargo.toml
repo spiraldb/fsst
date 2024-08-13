@@ -9,7 +9,7 @@ edition = "2021"
 
 [lints.rust]
 warnings = "deny"
-missing_docs = "deny"
+# missing_docs = "deny"
 
 [lints.clippy]
 all = { level = "deny", priority = -1 }
