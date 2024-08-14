@@ -22,7 +22,7 @@ use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
 use crate::find_longest::FindLongestSymbol;
-use crate::{CodeMeta, Symbol, SymbolTable, MAX_CODE};
+use crate::{Symbol, SymbolTable, MAX_CODE};
 
 #[derive(Debug, Clone)]
 struct Counter {

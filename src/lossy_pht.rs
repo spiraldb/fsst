@@ -1,5 +1,4 @@
 use std::fmt::Debug;
-use std::fmt::Formatter;
 
 use crate::CodeMeta;
 use crate::Symbol;
@@ -11,94 +10,6 @@ use crate::MAX_CODE;
 /// table size. The paper does not account for the fact that most
 /// vendors split the L1 cache into 32KB of instruction and 32KB of data.
 pub const HASH_TABLE_SIZE: usize = 1 << 11;
-
-/// Bit-packed metadata for a [`TableEntry`]
-///
-/// Bitpacked layout:
-///
-/// bits 9-15: ignored bits in the symbol. Equivalent to 64 - symbol.len()*8
-/// bit 8: the "unused" flag
-/// bits 0-7: code value (0-254)
-#[derive(Clone, Copy)]
-#[repr(C)]
-pub(crate) struct PackedMeta(u16);
-
-assert_sizeof!(PackedMeta => 2);
-
-impl PackedMeta {
-    /// Constant unused instance.
-    ///
-    /// All bits are set, corresponding to
-    ///
-    /// 6 bits set for `ignored bits`
-    /// 1 unused bit
-    /// 1 bit to indicate the `unused` flag
-    /// 8 bits of `code` data
-    pub const UNUSED: Self = Self(0b10000001_11111111);
-
-    /// The 8th bit toggles if the slot is unused or not.
-    const UNUSED_FLAG: u16 = 1 << 8;
-
-    /// Create a new `PackedSymbolMeta` from raw parts.
-    ///
-    /// # Panics
-    /// If `len` > 8 or `code` > [`Code::CODE_MAX`]
-    pub fn new(len: u16, code: u8) -> Self {
-        assert!(len <= 8, "cannot construct PackedCode with len > 8");
-
-        let ignored_bits = 64 - 8 * len;
-
-        let packed = (ignored_bits << 9) | (code as u16);
-        Self(packed)
-    }
-
-    /// Import a `PackedSymbolMeta` from a raw `u16`.
-    pub fn from_u16(value: u16) -> Self {
-        assert!(
-            (value >> 9) <= 64,
-            "cannot construct PackedCode with len > 8"
-        );
-
-        Self(value)
-    }
-
-    /// Get the number of ignored bits in the corresponding symbol's `u64` representation.
-    ///
-    /// Always <= 64
-    #[inline]
-    pub(crate) fn ignored_bits(&self) -> u16 {
-        self.0 >> 9
-    }
-
-    /// Get the code value.
-    #[inline]
-    pub(crate) fn code(&self) -> u8 {
-        self.0 as u8
-    }
-
-    /// Check if the unused flag is set
-    #[inline]
-    pub(crate) fn is_unused(&self) -> bool {
-        (self.0 & Self::UNUSED_FLAG) != 0
-    }
-}
-
-impl Default for PackedMeta {
-    fn default() -> Self {
-        // The default implementation of a `PackedMeta` is one where only the `UNUSED_FLAG` is set,
-        // representing an unused slot in the table.
-        Self::UNUSED
-    }
-}
-
-impl Debug for PackedMeta {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("PackedCode")
-            .field("ignored_bits", &self.ignored_bits())
-            .field("code", &self.code())
-            .finish()
-    }
-}
 
 /// A single entry in the [`SymbolTable`].
 ///
@@ -203,16 +114,5 @@ impl LossyPHT {
 impl Default for LossyPHT {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use crate::lossy_pht::PackedMeta;
-
-    #[test]
-    fn test_packedmeta() {
-        assert!(PackedMeta::UNUSED.is_unused());
-        assert_eq!(PackedMeta::UNUSED.ignored_bits(), 64);
     }
 }

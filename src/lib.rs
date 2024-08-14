@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(unused)]
 #![doc = include_str!("../README.md")]
 
 /// Throw a compiler error if a type isn't guaranteed to have a specific size in bytes.
@@ -184,32 +183,11 @@ impl CodeMeta {
         Self(value)
     }
 
-    /// Create a new code representing an escape byte.
-    fn new_escaped(byte: u8) -> Self {
-        Self::new(byte, true, 1)
-    }
-
     /// Create a new code from a [`Symbol`].
     fn new_symbol(code: u8, symbol: Symbol) -> Self {
         assert_ne!(code, ESCAPE_CODE, "ESCAPE_CODE cannot be used for symbol");
 
         Self::new(code, false, symbol.len() as u16)
-    }
-
-    /// Create a `Code` directly from a `u16` value.
-    ///
-    /// # Panics
-    /// Panic if the value is ≥ the defined `CODE_MAX`.
-    fn from_u16(code: u16) -> Self {
-        assert!((code >> 12) <= 8, "len must be <= 8");
-
-        Self(code)
-    }
-
-    /// Returns true if the code is for an escape byte.
-    #[inline]
-    fn is_escape(&self) -> bool {
-        self.0 <= 255
     }
 
     #[inline]
@@ -225,11 +203,6 @@ impl CodeMeta {
     #[inline]
     fn len(&self) -> u16 {
         self.0 >> 12
-    }
-
-    #[inline]
-    fn as_u16(&self) -> u16 {
-        self.0
     }
 }
 
@@ -284,23 +257,13 @@ impl Default for SymbolTable {
         let mut table = Self {
             symbols: [Symbol::ZERO; 511],
             n_symbols: 0,
-            codes_twobyte: Vec::with_capacity(65_536),
+            codes_twobyte: vec![CodeMeta::EMPTY; 65_536],
             lossy_pht: LossyPHT::new(),
         };
 
         // Populate the escape byte entries.
         for byte in 0..=255 {
             table.symbols[byte as usize] = Symbol::from_u8(byte);
-        }
-
-        // Populate the "codes" for twobytes to default to the escape sequence
-        // for the first byte
-        for first in 0..256 {
-            for _second in 0..256 {
-                // let default_code = CodeMeta::new_escaped(first as u8);
-                // table.codes_twobyte.push(default_code);
-                table.codes_twobyte.push(CodeMeta::EMPTY)
-            }
         }
 
         table
@@ -355,12 +318,7 @@ impl SymbolTable {
     ///
     /// `in_ptr` and `out_ptr` must never be NULL or otherwise point to invalid memory.
     #[inline(never)]
-    pub(crate) unsafe fn compress_word(
-        &self,
-        word: u64,
-        out_ptr: *mut u8,
-        out_start: *mut u8,
-    ) -> (usize, usize) {
+    pub(crate) unsafe fn compress_word(&self, word: u64, out_ptr: *mut u8) -> (usize, usize) {
         // Speculatively write the first byte of `word` at offset 1. This is necessary if it is an escape, and
         // if it isn't, it will be overwritten anyway.
         //
@@ -412,7 +370,6 @@ impl SymbolTable {
 
         let mut in_ptr = plaintext.as_ptr();
         let mut out_ptr = values.as_mut_ptr();
-        let out_start = values.as_mut_ptr();
 
         // SAFETY: `end` will point just after the end of the `plaintext` slice.
         let in_end = unsafe { in_ptr.byte_add(plaintext.len()) };
@@ -426,7 +383,7 @@ impl SymbolTable {
                 // Load a full 8-byte word of data from in_ptr.
                 // SAFETY: caller asserts in_ptr is not null. we may read past end of pointer though.
                 let word: u64 = (in_ptr as *const u64).read_unaligned();
-                let (advance_in, advance_out) = self.compress_word(word, out_ptr, out_start);
+                let (advance_in, advance_out) = self.compress_word(word, out_ptr);
                 in_ptr = in_ptr.byte_add(advance_in);
                 out_ptr = out_ptr.byte_add(advance_out);
             };
@@ -446,7 +403,7 @@ impl SymbolTable {
             unsafe {
                 // Load a full 8-byte word of data from in_ptr.
                 // SAFETY: caller asserts in_ptr is not null. we may read past end of pointer though.
-                let (advance_in, advance_out) = self.compress_word(last_word, out_ptr, out_start);
+                let (advance_in, advance_out) = self.compress_word(last_word, out_ptr);
                 in_ptr = in_ptr.byte_add(advance_in);
                 out_ptr = out_ptr.byte_add(advance_out);
 
@@ -538,19 +495,6 @@ fn advance_8byte_word(word: u64, bytes: usize) -> u64 {
         0
     } else {
         word >> (8 * bytes)
-    }
-}
-
-fn advance_8byte_word_bits(word: u64, bits: usize) -> u64 {
-    // shift the word off the right-end, because little endian means the first
-    // char is stored in the LSB.
-    //
-    // Note that even though this looks like it branches, Rust compiles this to a
-    // conditional move instruction. See `<https://godbolt.org/z/Pbvre65Pq>`
-    if bits == 64 {
-        0
-    } else {
-        word >> bits
     }
 }
 

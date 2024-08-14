@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use crate::find_longest::FindLongestSymbol;
-use crate::{CodeMeta, SymbolTable};
+use crate::SymbolTable;
 
 // Find the code that maps to a symbol with longest-match to a piece of text.
 //
