@@ -150,44 +150,53 @@ impl Debug for Symbol {
     }
 }
 
-/// Codes used to map symbols to bytes.
+/// Code and associated metadata fro a symbol.
 ///
-/// Logically, codes can range from 0-255 inclusive. Physically, we represent them as a 9-bit
-/// value packed into a `u16`.
+/// Logically, codes can range from 0-255 inclusive. This type holds both the 8-bit code as well as
+/// other metadata bit-packed into a `u16`.
 ///
-/// Physically in-memory, `Code(0)` through `Code(255)` corresponds to escape sequences of raw bytes
-/// 0 through 255. `Code(256)` through `Code(511)` represent the actual codes -255.
+/// The bottom 8 bits contain EITHER a code for a symbol stored in the table, OR a raw byte.
+///
+/// The interpretation depends on the 9th bit: when toggled off, the value stores a raw byte, and when
+/// toggled on, it stores a code. Thus if you examine the bottom 9 bits of the `u16`, you have an extended
+/// code range, where the values 0-255 are raw bytes, and the values 256-510 represent codes 0-254. 511 is
+/// a placeholder for the invalid code here.
+///
+/// Bits 12-15 store the length of the symbol (values ranging from 0-8).
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Code(u16);
+pub struct CodeMeta(u16);
 
-impl Code {
-    /// Maximum value for the in-memory `Code` representation.
-    ///
-    /// When truncated to u8 this is code 255, which is equivalent to [`Self::ESCAPE_CODE`].
-    pub const CODE_MAX: u16 = 511;
+/// Code used to indicate bytes that are not in the symbol table.
+///
+/// When compressing a string that cannot fully be expressed with the symbol table, the compressed
+/// output will contain an `ESCAPE` byte followed by a raw byte. At decompression time, the presence
+/// of `ESCAPE` indicates that the next byte should be appended directly to the result instead of
+/// being looked up in the symbol table.
+pub const ESCAPE_CODE: u8 = 255;
 
-    /// Code used to indicate bytes that are not in the symbol table.
-    ///
-    /// When compressing a string that cannot fully be expressed with the symbol table, the compressed
-    /// output will contain an `ESCAPE` byte followed by a raw byte. At decompression time, the presence
-    /// of `ESCAPE` indicates that the next byte should be appended directly to the result instead of
-    /// being looked up in the symbol table.
-    pub const ESCAPE_CODE: u8 = 255;
+/// Maximum value for the extended code range.
+///
+/// When truncated to u8 this is code 255, which is equivalent to [`ESCAPE_CODE`].
+pub const MAX_CODE: u16 = 511;
+
+impl CodeMeta {
+    pub const EMPTY: Self = CodeMeta(MAX_CODE);
+
+    pub fn new(code: u8, escape: bool, len: u16) -> Self {
+        let value = (len << 12) | ((escape as u16) << 8) | (code as u16);
+        Self(value)
+    }
 
     /// Create a new code representing an escape byte.
     pub fn new_escaped(byte: u8) -> Self {
-        Self(byte as u16)
+        Self::new(byte, true, 1)
     }
 
-    /// Create a new code representing a symbol.
-    pub fn new_symbol(code: u8) -> Self {
-        assert_ne!(
-            code,
-            Code::ESCAPE_CODE,
-            "code {code} cannot be used for symbol, reserved for ESCAPE"
-        );
+    /// Create a new code from a [`Symbol`].
+    pub fn new_symbol(code: u8, symbol: Symbol) -> Self {
+        assert_ne!(code, ESCAPE_CODE, "ESCAPE_CODE cannot be used for symbol");
 
-        Self((code as u16) + 256)
+        Self::new(code, false, symbol.len() as u16)
     }
 
     /// Create a `Code` directly from a `u16` value.
@@ -195,7 +204,11 @@ impl Code {
     /// # Panics
     /// Panic if the value is ≥ the defined `CODE_MAX`.
     pub fn from_u16(code: u16) -> Self {
-        assert!(code < Self::CODE_MAX, "code value higher than CODE_MAX");
+        assert!((code >> 12) <= 8, "len must be <= 8");
+        assert!(
+            (code & 0b111_111_111) <= MAX_CODE,
+            "code value higher than MAX_CODE"
+        );
 
         Self(code)
     }
@@ -205,13 +218,34 @@ impl Code {
     pub fn is_escape(&self) -> bool {
         self.0 <= 255
     }
+
+    #[inline]
+    pub fn code(&self) -> u8 {
+        self.0 as u8
+    }
+
+    #[inline]
+    pub fn extended_code(&self) -> u16 {
+        self.0 & 0b111_111_111
+    }
+
+    #[inline]
+    pub fn len(&self) -> u16 {
+        self.0 >> 12
+    }
+
+    #[inline]
+    pub fn as_u16(&self) -> u16 {
+        self.0
+    }
 }
 
-impl Debug for Code {
+impl Debug for CodeMeta {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Code")
-            .field("code_byte", &(self.0 as u8))
-            .field("escape", &(self.0 < 256))
+        f.debug_struct("CodeMeta")
+            .field("code", &(self.0 as u8))
+            .field("is_escape", &(self.0 < 256))
+            .field("len", &(self.0 >> 12))
             .finish()
     }
 }
@@ -246,7 +280,7 @@ pub struct SymbolTable {
     // Index structures used to speedup building the symbol table and compression
     //
     /// Inverted index mapping 2-byte symbols to codes
-    codes_twobyte: Vec<u16>,
+    codes_twobyte: Vec<CodeMeta>,
 
     /// Lossy perfect hash table for looking up codes to symbols that are 3 bytes or more
     lossy_pht: LossyPHT,
@@ -257,7 +291,7 @@ impl Default for SymbolTable {
         let mut table = Self {
             symbols: [Symbol::ZERO; 511],
             n_symbols: 0,
-            codes_twobyte: vec![0; 65_536],
+            codes_twobyte: Vec::with_capacity(65_536),
             lossy_pht: LossyPHT::new(),
         };
 
@@ -266,12 +300,13 @@ impl Default for SymbolTable {
             table.symbols[byte as usize] = Symbol::from_u8(byte);
         }
 
-        // Populate the "codes" for twobytes to default to the escape sequence.
+        // Populate the "codes" for twobytes to default to the escape sequence
+        // for the first byte
         for first in 0..256 {
-            for second in 0..256 {
-                let index = (first << 8) | second;
-                // 511 is (first << 8) | ESCAPE_CODE
-                table.codes_twobyte[index as usize] = (first << 8) | (1 << 8) | 0xFF;
+            for _second in 0..256 {
+                // let default_code = CodeMeta::new_escaped(first as u8);
+                // table.codes_twobyte.push(default_code);
+                table.codes_twobyte.push(CodeMeta::EMPTY)
             }
         }
 
@@ -292,9 +327,15 @@ impl SymbolTable {
         assert!(self.n_symbols < 255, "cannot insert into full symbol table");
 
         let symbol_len = symbol.len();
-        if symbol_len == 2 {
-            // Speculatively insert the symbol into the twobyte cache
-            self.codes_twobyte[symbol.first_two_bytes() as usize] = self.n_symbols as u16;
+        if symbol_len <= 2 {
+            // Insert the 2-byte symbol into the twobyte cache
+            // println!(
+            //     "FILLING twobyte[{}] = {:?}",
+            //     self.n_symbols,
+            //     symbol.first_two_bytes().to_le_bytes().map(|c| c as char)
+            // );
+            self.codes_twobyte[symbol.first_two_bytes() as usize] =
+                CodeMeta::new_symbol(self.n_symbols, symbol);
         } else if symbol_len >= 3 {
             // Attempt to insert larger symbols into the 3-byte cache
             if !self.lossy_pht.insert(symbol, self.n_symbols) {
@@ -337,84 +378,77 @@ impl SymbolTable {
         //
         // SAFETY: caller ensures out_ptr is not null
         let first_byte = word as u8;
-        println!(
-            "WRITING out[{}] = {}",
-            out_ptr.byte_add(1).offset_from(out_start) as usize,
-            first_byte
-        );
+        // println!(
+        //     "WRITING out[{}] = {}",
+        //     out_ptr.byte_add(1).offset_from(out_start) as usize,
+        //     first_byte
+        // );
         unsafe { out_ptr.byte_add(1).write_unaligned(first_byte) };
 
         // Probe the hash table
         let entry = self.lossy_pht.lookup(word);
 
         // Now, downshift the `word` and the `entry` to see if they align.
-        let ignored_bits = entry.packed_meta.ignored_bits();
-        let mask = if ignored_bits == 64 {
-            0
-        } else {
-            u64::MAX >> ignored_bits
-        };
-        let word_prefix = word & mask;
+        let ignored_bits = entry.ignored_bits;
 
-        // This ternary-like branch corresponds to the "conditional move" line from the paper's Algorithm 4:
-        // if the shifted word and symbol match, we use it. Else, we use the precomputed twobyte code for this
-        // byte sequence.
-        let code = if entry.symbol.as_u64() == word_prefix && !entry.packed_meta.is_unused() {
-            // Show symbol as str
-            println!(
-                "  HIT emitting code for symbol {:?}",
-                entry
-                    .symbol
-                    .as_slice()
-                    .iter()
-                    .map(|c| *c as char)
-                    .collect::<Vec<char>>()
-            );
-            entry.packed_meta.code() as u16
-        } else {
+        if !compare_masked(word, entry.symbol.as_u64(), ignored_bits) || entry.is_unused() {
+            // lookup the appropriate code for the twobyte sequence and write it
+            // This will hold either 511, OR it will hold the actual code.
             let code = self.codes_twobyte[(word as u16) as usize];
-            println!("  MISS - code={:X?}", code);
-            if code >= 256 {
-                // It's an escape of the current word first byte.
-                println!(
-                    "  MISS - emitting escape for char '{}'",
-                    ((code >> 8) as u8 as char)
-                );
-            } else {
-                println!(
-                    "  MISS - emitting code {} for symbol {:?}",
-                    code,
-                    self.symbols[(256 + code) as usize]
-                        .as_slice()
-                        .iter()
-                        .map(|c| *c as char)
-                        .collect::<Vec<char>>(),
-                );
+            let out = code.code();
+            unsafe {
+                out_ptr.write(out);
             }
-            self.codes_twobyte[(word as u16) as usize]
-        };
-        // Write the first byte of `code` to the output position.
-        // The code will either by a real code with a single byte of padding, OR a two-byte code sequence.
-        println!(
-            "WRITING out[{}] = {}",
-            out_ptr.offset_from(out_start) as usize,
-            (code as u8)
-        );
+
+            // Advance the input by one byte and the output by 1 byte (if real code) or 2 bytes (if escape).
+            return (
+                if out == ESCAPE_CODE {
+                    1
+                } else {
+                    code.len() as usize
+                },
+                if out == ESCAPE_CODE { 2 } else { 1 },
+            );
+        }
+
+        let code = entry.code;
         unsafe {
-            out_ptr.write_unaligned(code as u8);
-        };
+            out_ptr.write_unaligned(code.code());
+        }
 
-        // Seek the pointers forward.
-        // NOTE: if the symbol is not a hit,
-        let advance_in = if entry.symbol.as_u64() == word_prefix && !entry.packed_meta.is_unused() {
-            entry.symbol.len()
-        } else {
-            1
-        };
-        let advance_out = 1 + ((code >> 8) & 1) as usize;
-        println!("ADVANCE in={} out={} \n", advance_in, advance_out);
+        return (code.len() as usize, 1);
 
-        (advance_in, advance_out)
+        // println!("  CODE = {}", code.extended_code(),);
+
+        // // Lookup symbol
+        // // println!(
+        // //     "  SYMBOL = {:?}",
+        // //     self.symbols[code.extended_code() as usize]
+        // //         .as_slice()
+        // //         .iter()
+        // //         .map(|c| *c as char)
+        // //         .collect::<Vec<char>>(),
+        // // );
+
+        // // Write the first byte of `code` to the output position.
+        // // The code will either by a real code with a single byte of padding, OR a two-byte code sequence.
+        // println!(
+        //     "WRITING out[{}] = {}",
+        //     out_ptr.offset_from(out_start) as usize,
+        //     (code.code())
+        // );
+        // unsafe {
+        //     out_ptr.write_unaligned(code.code());
+        // };
+
+        // // Seek the pointers forward.
+        // //
+        // // IN: advance by code.len()
+        // let advance_in = code.len() as usize;
+        // let advance_out = 1 + ((code.as_u16() >> 8) & 1) as usize;
+        // println!("ADVANCE in={} out={} \n", advance_in, advance_out);
+
+        // (advance_in, advance_out)
     }
 
     /// Use the symbol table to compress the plaintext into a sequence of codes and escapes.
@@ -452,9 +486,18 @@ impl SymbolTable {
         // Shift off the remaining bytes
         let mut last_word = unsafe { (in_ptr as *const u64).read_unaligned() };
         last_word = mask_prefix(last_word, remaining_bytes as usize);
+        // println!(
+        //     "OUTER COMPRESS last_word = {:?}",
+        //     last_word.to_le_bytes().map(|c| c as char)
+        // );
 
         while in_ptr < in_end && out_ptr < out_end {
             unsafe {
+                // println!(
+                //     "=>INNER COMPRESS last_word = {:?}",
+                //     last_word.to_le_bytes().map(|c| c as char)
+                // );
+
                 // Load a full 8-byte word of data from in_ptr.
                 // SAFETY: caller asserts in_ptr is not null. we may read past end of pointer though.
                 let (advance_in, advance_out) = self.compress_word(last_word, out_ptr, out_start);
@@ -494,7 +537,7 @@ impl SymbolTable {
 
         while in_pos < compressed.len() && out_pos < (decoded.capacity() + size_of::<Symbol>()) {
             let code = compressed[in_pos];
-            if code == Code::ESCAPE_CODE {
+            if code == ESCAPE_CODE {
                 // Advance by one, do raw write.
                 in_pos += 1;
                 // SAFETY: out_pos is always 8 bytes or more from the end of decoded buffer
@@ -576,7 +619,7 @@ fn print_compressed(block: &[u8]) {
     let mut idx = 0;
     while idx < block.len() {
         let byte = block[idx];
-        if byte == Code::ESCAPE_CODE {
+        if byte == ESCAPE_CODE {
             repr.push("ESCAPE".to_string());
             idx += 1;
             repr.push(format!("'{}'", block[idx] as char));
@@ -585,5 +628,15 @@ fn print_compressed(block: &[u8]) {
         }
         idx += 1;
     }
-    println!("compressed: {:?}", repr);
+    // println!("compressed: {:?}", repr);
+}
+
+fn compare_masked(left: u64, right: u64, ignored_bits: u16) -> bool {
+    let mask = if ignored_bits == 64 {
+        0
+    } else {
+        u64::MAX >> ignored_bits
+    };
+
+    (left & mask) == right
 }

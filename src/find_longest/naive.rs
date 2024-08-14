@@ -13,23 +13,26 @@
 // limitations under the License.
 
 use crate::find_longest::FindLongestSymbol;
-use crate::{Code, SymbolTable};
+use crate::{CodeMeta, SymbolTable};
 
-/// Find the longest substring.
+// Find the code that maps to a symbol with longest-match to a piece of text.
+//
+// This is the naive algorithm that just scans the whole table and is very slow.
 
 impl FindLongestSymbol for SymbolTable {
     // NOTE(aduffy): if you don't disable inlining, this function won't show up in profiles.
     #[inline(never)]
-    fn find_longest_symbol(&self, text: &[u8]) -> Code {
+    fn find_longest_symbol(&self, text: &[u8]) -> u16 {
         debug_assert!(!text.is_empty(), "text must not be empty");
 
         // Find the code that best maps to the provided text table here.
-        let mut best_code = Code::new_escaped(text[0]);
+        // Start with the code corresponding to the escape of the first character in the text
+        let mut best_code = text[0] as u16;
         let mut best_overlap = 1;
-        for code in 0..511 {
+        for code in 256..511 {
             let symbol = &self.symbols[code as usize];
             if symbol.is_prefix(text) && symbol.len() > best_overlap {
-                best_code = Code::from_u16(code);
+                best_code = code;
                 best_overlap = symbol.len();
             }
         }

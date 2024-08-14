@@ -2,7 +2,9 @@ use std::fmt::Debug;
 use std::fmt::Formatter;
 use std::u16;
 
+use crate::CodeMeta;
 use crate::Symbol;
+use crate::MAX_CODE;
 
 /// Size of the perfect hash table.
 ///
@@ -109,14 +111,24 @@ pub(crate) struct TableEntry {
     /// Symbol, piece of a string, 8 bytes or fewer.
     pub(crate) symbol: Symbol,
 
-    /// Bit-packed metadata for the entry.
+    /// Code and associated metadata for the symbol
+    pub(crate) code: CodeMeta,
+
+    /// Number of ignored bits in `symbol`.
     ///
-    /// [`PackedMeta`] provides compact, efficient access to metadata about the `symbol`, including
-    /// its code and length.
-    pub(crate) packed_meta: PackedMeta,
+    /// This is equivalent to `64 - 8 * code.len()` but is pre-computed to save a few instructions in
+    /// the compression loop.
+    pub(crate) ignored_bits: u16,
 }
 
 assert_sizeof!(TableEntry => 16);
+
+impl TableEntry {
+    pub(crate) fn is_unused(&self) -> bool {
+        // 511 should never come up for real, so use as the sentinel for an unused slot
+        self.code.extended_code() == MAX_CODE
+    }
+}
 
 /// Lossy Perfect Hash Table implementation for compression.
 ///
@@ -143,7 +155,8 @@ impl LossyPHT {
         for _ in 0..HASH_TABLE_SIZE {
             slots.push(TableEntry {
                 symbol: Symbol::ZERO,
-                packed_meta: PackedMeta::UNUSED,
+                code: CodeMeta::EMPTY,
+                ignored_bits: 64,
             });
         }
 
@@ -162,11 +175,12 @@ impl LossyPHT {
         let slot = self.hash(prefix_3bytes) as usize & (HASH_TABLE_SIZE - 1);
         let entry = &mut self.slots[slot];
 
-        if !entry.packed_meta.is_unused() {
+        if !entry.is_unused() {
             return false;
         } else {
             entry.symbol = symbol;
-            entry.packed_meta = PackedMeta::new(symbol.len() as u16, code);
+            entry.code = CodeMeta::new_symbol(code, symbol);
+            entry.ignored_bits = (64 - 8 * symbol.len()) as u16;
             return true;
         }
     }
