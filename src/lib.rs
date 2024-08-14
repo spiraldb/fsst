@@ -32,7 +32,7 @@ mod find_longest;
 mod lossy_pht;
 
 /// `Symbol`s are small (up to 8-byte) segments of strings, stored in a [`SymbolTable`] and
-/// identified by an 8-bit [`Code`].
+/// identified by an 8-bit code.
 #[derive(Copy, Clone)]
 pub union Symbol {
     bytes: [u8; 8],
