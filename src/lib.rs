@@ -329,11 +329,6 @@ impl SymbolTable {
         let symbol_len = symbol.len();
         if symbol_len <= 2 {
             // Insert the 2-byte symbol into the twobyte cache
-            // println!(
-            //     "FILLING twobyte[{}] = {:?}",
-            //     self.n_symbols,
-            //     symbol.first_two_bytes().to_le_bytes().map(|c| c as char)
-            // );
             self.codes_twobyte[symbol.first_two_bytes() as usize] =
                 CodeMeta::new_symbol(self.n_symbols, symbol);
         } else if symbol_len >= 3 {
@@ -378,11 +373,6 @@ impl SymbolTable {
         //
         // SAFETY: caller ensures out_ptr is not null
         let first_byte = word as u8;
-        // println!(
-        //     "WRITING out[{}] = {}",
-        //     out_ptr.byte_add(1).offset_from(out_start) as usize,
-        //     first_byte
-        // );
         unsafe { out_ptr.byte_add(1).write_unaligned(first_byte) };
 
         // Probe the hash table
@@ -417,42 +407,14 @@ impl SymbolTable {
         }
 
         return (code.len() as usize, 1);
-
-        // println!("  CODE = {}", code.extended_code(),);
-
-        // // Lookup symbol
-        // // println!(
-        // //     "  SYMBOL = {:?}",
-        // //     self.symbols[code.extended_code() as usize]
-        // //         .as_slice()
-        // //         .iter()
-        // //         .map(|c| *c as char)
-        // //         .collect::<Vec<char>>(),
-        // // );
-
-        // // Write the first byte of `code` to the output position.
-        // // The code will either by a real code with a single byte of padding, OR a two-byte code sequence.
-        // println!(
-        //     "WRITING out[{}] = {}",
-        //     out_ptr.offset_from(out_start) as usize,
-        //     (code.code())
-        // );
-        // unsafe {
-        //     out_ptr.write_unaligned(code.code());
-        // };
-
-        // // Seek the pointers forward.
-        // //
-        // // IN: advance by code.len()
-        // let advance_in = code.len() as usize;
-        // let advance_out = 1 + ((code.as_u16() >> 8) & 1) as usize;
-        // println!("ADVANCE in={} out={} \n", advance_in, advance_out);
-
-        // (advance_in, advance_out)
     }
 
     /// Use the symbol table to compress the plaintext into a sequence of codes and escapes.
     pub fn compress(&self, plaintext: &[u8]) -> Vec<u8> {
+        if plaintext.is_empty() {
+            return Vec::new();
+        }
+
         let mut values: Vec<u8> = Vec::with_capacity(2 * plaintext.len());
 
         let mut in_ptr = plaintext.as_ptr();
@@ -486,18 +448,9 @@ impl SymbolTable {
         // Shift off the remaining bytes
         let mut last_word = unsafe { (in_ptr as *const u64).read_unaligned() };
         last_word = mask_prefix(last_word, remaining_bytes as usize);
-        // println!(
-        //     "OUTER COMPRESS last_word = {:?}",
-        //     last_word.to_le_bytes().map(|c| c as char)
-        // );
 
         while in_ptr < in_end && out_ptr < out_end {
             unsafe {
-                // println!(
-                //     "=>INNER COMPRESS last_word = {:?}",
-                //     last_word.to_le_bytes().map(|c| c as char)
-                // );
-
                 // Load a full 8-byte word of data from in_ptr.
                 // SAFETY: caller asserts in_ptr is not null. we may read past end of pointer though.
                 let (advance_in, advance_out) = self.compress_word(last_word, out_ptr, out_start);
@@ -528,7 +481,6 @@ impl SymbolTable {
 
     /// Decompress a byte slice that was previously returned by [compression][Self::compress].
     pub fn decompress(&self, compressed: &[u8]) -> Vec<u8> {
-        print_compressed(compressed);
         let mut decoded: Vec<u8> = Vec::with_capacity(size_of::<Symbol>() * compressed.len());
         let ptr = decoded.as_mut_ptr();
 
@@ -607,28 +559,6 @@ pub fn advance_8byte_word_bits(word: u64, bits: usize) -> u64 {
     } else {
         word >> bits
     }
-}
-
-// fn print_word<T>(addr: *const T) -> String {
-//     let word = unsafe { (addr as *const u64).read_unaligned() };
-//     format!("{:?}", word.to_le_bytes().map(|c| c as char))
-// }
-
-fn print_compressed(block: &[u8]) {
-    let mut repr = Vec::new();
-    let mut idx = 0;
-    while idx < block.len() {
-        let byte = block[idx];
-        if byte == ESCAPE_CODE {
-            repr.push("ESCAPE".to_string());
-            idx += 1;
-            repr.push(format!("'{}'", block[idx] as char));
-        } else {
-            repr.push(format!("{}", block[idx]));
-        }
-        idx += 1;
-    }
-    // println!("compressed: {:?}", repr);
 }
 
 fn compare_masked(left: u64, right: u64, ignored_bits: u16) -> bool {

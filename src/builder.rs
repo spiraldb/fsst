@@ -80,6 +80,9 @@ pub fn train(corpus: impl AsRef<[u8]>) -> SymbolTable {
     let mut table = SymbolTable::default();
     // TODO(aduffy): handle truncating/sampling if corpus > requires sample size.
     let sample = corpus.as_ref();
+    if sample.is_empty() {
+        return table;
+    }
     for _generation in 0..MAX_GENERATIONS {
         let counter = table.compress_count(sample);
         table = table.optimize(counter);
