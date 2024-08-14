@@ -9,7 +9,7 @@ edition = "2021"
 
 [lints.rust]
 warnings = "deny"
-# missing_docs = "deny"
+missing_docs = "deny"
 
 [lints.clippy]
 all = { level = "deny", priority = -1 }
@@ -35,13 +35,7 @@ test = false
 name = "compress"
 harness = false
 
-# [profile.dev]
-# lto = "off"
-
-# [profile.release]
-# opt-level = 3
-# lto = "off"
-
-# [profile.bench]
-# opt-level = 3
-# lto = "thin"
+[[test]]
+name = "correctness"
+test = true
+bench = false

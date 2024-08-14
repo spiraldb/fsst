@@ -1,6 +1,6 @@
-use core::str;
+//! Simple example where we show round-tripping a string through the static symbol table.
 
-/// Simple example of compression.
+use core::str;
 
 fn main() {
     // Train on a sample.

@@ -1,6 +1,5 @@
 use std::fmt::Debug;
 use std::fmt::Formatter;
-use std::u16;
 
 use crate::CodeMeta;
 use crate::Symbol;
@@ -68,7 +67,7 @@ impl PackedMeta {
     /// Always <= 64
     #[inline]
     pub(crate) fn ignored_bits(&self) -> u16 {
-        (self.0 >> 9) as u16
+        self.0 >> 9
     }
 
     /// Get the code value.
@@ -175,13 +174,13 @@ impl LossyPHT {
         let slot = self.hash(prefix_3bytes) as usize & (HASH_TABLE_SIZE - 1);
         let entry = &mut self.slots[slot];
 
-        if !entry.is_unused() {
-            return false;
+        if entry.is_unused() {
+            false
         } else {
             entry.symbol = symbol;
             entry.code = CodeMeta::new_symbol(code, symbol);
             entry.ignored_bits = (64 - 8 * symbol.len()) as u16;
-            return true;
+            true
         }
     }
 

@@ -22,10 +22,7 @@ macro_rules! assert_sizeof {
     };
 }
 
-use std::{
-    fmt::{Debug, Formatter},
-    u64,
-};
+use std::fmt::{Debug, Formatter};
 
 pub use builder::*;
 use lossy_pht::LossyPHT;
@@ -71,7 +68,6 @@ impl Symbol {
     ///
     /// Each symbol has the capacity to hold up to 8 bytes of data, but the symbols
     /// can contain fewer bytes, padded with 0x00.
-    #[inline(never)]
     pub fn len(&self) -> usize {
         let numeric = unsafe { self.num };
         // For little-endian platforms, this counts the number of *trailing* zeros
@@ -88,7 +84,7 @@ impl Symbol {
     }
 
     #[inline]
-    pub fn as_u64(&self) -> u64 {
+    fn as_u64(&self) -> u64 {
         // SAFETY: the bytes can always be viewed as a u64
         unsafe { self.num }
     }
@@ -164,7 +160,7 @@ impl Debug for Symbol {
 ///
 /// Bits 12-15 store the length of the symbol (values ranging from 0-8).
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct CodeMeta(u16);
+struct CodeMeta(u16);
 
 /// Code used to indicate bytes that are not in the symbol table.
 ///
@@ -179,21 +175,22 @@ pub const ESCAPE_CODE: u8 = 255;
 /// When truncated to u8 this is code 255, which is equivalent to [`ESCAPE_CODE`].
 pub const MAX_CODE: u16 = 511;
 
+#[allow(clippy::len_without_is_empty)]
 impl CodeMeta {
-    pub const EMPTY: Self = CodeMeta(MAX_CODE);
+    const EMPTY: Self = CodeMeta(MAX_CODE);
 
-    pub fn new(code: u8, escape: bool, len: u16) -> Self {
+    fn new(code: u8, escape: bool, len: u16) -> Self {
         let value = (len << 12) | ((escape as u16) << 8) | (code as u16);
         Self(value)
     }
 
     /// Create a new code representing an escape byte.
-    pub fn new_escaped(byte: u8) -> Self {
+    fn new_escaped(byte: u8) -> Self {
         Self::new(byte, true, 1)
     }
 
     /// Create a new code from a [`Symbol`].
-    pub fn new_symbol(code: u8, symbol: Symbol) -> Self {
+    fn new_symbol(code: u8, symbol: Symbol) -> Self {
         assert_ne!(code, ESCAPE_CODE, "ESCAPE_CODE cannot be used for symbol");
 
         Self::new(code, false, symbol.len() as u16)
@@ -203,39 +200,35 @@ impl CodeMeta {
     ///
     /// # Panics
     /// Panic if the value is ≥ the defined `CODE_MAX`.
-    pub fn from_u16(code: u16) -> Self {
+    fn from_u16(code: u16) -> Self {
         assert!((code >> 12) <= 8, "len must be <= 8");
-        assert!(
-            (code & 0b111_111_111) <= MAX_CODE,
-            "code value higher than MAX_CODE"
-        );
 
         Self(code)
     }
 
     /// Returns true if the code is for an escape byte.
     #[inline]
-    pub fn is_escape(&self) -> bool {
+    fn is_escape(&self) -> bool {
         self.0 <= 255
     }
 
     #[inline]
-    pub fn code(&self) -> u8 {
+    fn code(&self) -> u8 {
         self.0 as u8
     }
 
     #[inline]
-    pub fn extended_code(&self) -> u16 {
+    fn extended_code(&self) -> u16 {
         self.0 & 0b111_111_111
     }
 
     #[inline]
-    pub fn len(&self) -> u16 {
+    fn len(&self) -> u16 {
         self.0 >> 12
     }
 
     #[inline]
-    pub fn as_u16(&self) -> u16 {
+    fn as_u16(&self) -> u16 {
         self.0
     }
 }
@@ -406,7 +399,7 @@ impl SymbolTable {
             out_ptr.write_unaligned(code.code());
         }
 
-        return (code.len() as usize, 1);
+        (code.len() as usize, 1)
     }
 
     /// Use the symbol table to compress the plaintext into a sequence of codes and escapes.
@@ -529,7 +522,7 @@ fn mask_prefix(word: u64, prefix_bytes: usize) -> u64 {
     let mask = if prefix_bytes == 0 {
         0
     } else {
-        u64::MAX >> 8 * (8 - prefix_bytes)
+        u64::MAX >> (8 * (8 - prefix_bytes))
     };
 
     word & mask
@@ -544,11 +537,11 @@ fn advance_8byte_word(word: u64, bytes: usize) -> u64 {
     if bytes == 8 {
         0
     } else {
-        word >> 8 * bytes
+        word >> (8 * bytes)
     }
 }
 
-pub fn advance_8byte_word_bits(word: u64, bits: usize) -> u64 {
+fn advance_8byte_word_bits(word: u64, bits: usize) -> u64 {
     // shift the word off the right-end, because little endian means the first
     // char is stored in the LSB.
     //
