@@ -2,7 +2,6 @@ use std::fmt::Debug;
 use std::fmt::Formatter;
 use std::u16;
 
-use crate::Code;
 use crate::Symbol;
 
 /// Size of the perfect hash table.
@@ -16,8 +15,7 @@ pub const HASH_TABLE_SIZE: usize = 1 << 11;
 ///
 /// Bitpacked layout:
 ///
-/// bits 10-15: ignored bits in the symbol. Equivalent to 64 - symbol.len()*8
-/// bit 9: not used
+/// bits 9-15: ignored bits in the symbol. Equivalent to 64 - symbol.len()*8
 /// bit 8: the "unused" flag
 /// bits 0-7: code value (0-254)
 #[derive(Clone, Copy)]
@@ -32,9 +30,10 @@ impl PackedMeta {
     /// All bits are set, corresponding to
     ///
     /// 6 bits set for `ignored bits`
+    /// 1 unused bit
     /// 1 bit to indicate the `unused` flag
     /// 8 bits of `code` data
-    pub const UNUSED: Self = Self(0xFFFF);
+    pub const UNUSED: Self = Self(0b10000001_11111111);
 
     /// The 8th bit toggles if the slot is unused or not.
     const UNUSED_FLAG: u16 = 1 << 8;
@@ -48,19 +47,15 @@ impl PackedMeta {
 
         let ignored_bits = 64 - 8 * len;
 
-        let packed = (ignored_bits << 10) | (code as u16);
+        let packed = (ignored_bits << 9) | (code as u16);
         Self(packed)
     }
 
     /// Import a `PackedSymbolMeta` from a raw `u16`.
     pub fn from_u16(value: u16) -> Self {
         assert!(
-            (value >> 12) <= 64,
+            (value >> 9) <= 64,
             "cannot construct PackedCode with len > 8"
-        );
-        assert!(
-            (value & 0b111_111_111) <= Code::CODE_MAX,
-            "cannot construct PackedCode with code > CODE_MAX"
         );
 
         Self(value)
@@ -70,11 +65,11 @@ impl PackedMeta {
     ///
     /// Always <= 64
     #[inline]
-    pub(crate) fn ignored_bits(&self) -> usize {
-        ((self.0 >> 12) & 0b1111) as usize
+    pub(crate) fn ignored_bits(&self) -> u16 {
+        (self.0 >> 9) as u16
     }
 
-    /// Get the raw code value.
+    /// Get the code value.
     #[inline]
     pub(crate) fn code(&self) -> u8 {
         self.0 as u8
@@ -165,7 +160,8 @@ impl LossyPHT {
     pub(crate) fn insert(&mut self, symbol: Symbol, code: u8) -> bool {
         let prefix_3bytes = symbol.as_u64() & 0xFF_FF_FF;
         let slot = self.hash(prefix_3bytes) as usize & (HASH_TABLE_SIZE - 1);
-        let mut entry = self.slots[slot];
+        println!("\t\tinserting to slot {slot}");
+        let entry = &mut self.slots[slot];
 
         if !entry.packed_meta.is_unused() {
             return false;
@@ -195,5 +191,16 @@ impl LossyPHT {
 impl Default for LossyPHT {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::lossy_pht::PackedMeta;
+
+    #[test]
+    fn test_packedmeta() {
+        assert!(PackedMeta::UNUSED.is_unused());
+        assert_eq!(PackedMeta::UNUSED.ignored_bits(), 64);
     }
 }
