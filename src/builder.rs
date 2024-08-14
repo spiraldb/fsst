@@ -209,6 +209,7 @@ mod test {
 
         // Use the table to compress a string, see the values
         let compressed = table.compress(text.as_bytes());
+        assert_eq!(compressed, vec![0u8, 1u8, 2u8]);
 
         // Ensure that the compressed string has no escape bytes
         assert!(compressed.iter().all(|b| *b != Code::ESCAPE_CODE));
@@ -231,6 +232,6 @@ mod test {
                 Code::ESCAPE_CODE,
                 b'3',
             ]
-        )
+        );
     }
 }

@@ -4,6 +4,7 @@
 //!
 //! Also contains LZ4 baseline.
 #![allow(missing_docs)]
+use core::str;
 use std::io::{Cursor, Read, Write};
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
@@ -36,7 +37,10 @@ fn bench_fsst(c: &mut Criterion) {
         compressed.len()
     );
 
-    assert_eq!(table.decompress(&compressed), TEST.as_bytes());
+    let decompressed = table.decompress(&compressed);
+    let decompressed = str::from_utf8(&decompressed).unwrap();
+    println!("DECODED: {}", decompressed);
+    assert_eq!(decompressed, TEST);
 
     group.bench_function("compress-single", |b| {
         b.iter(|| black_box(table.compress(black_box(plaintext))));

@@ -160,7 +160,6 @@ impl LossyPHT {
     pub(crate) fn insert(&mut self, symbol: Symbol, code: u8) -> bool {
         let prefix_3bytes = symbol.as_u64() & 0xFF_FF_FF;
         let slot = self.hash(prefix_3bytes) as usize & (HASH_TABLE_SIZE - 1);
-        println!("\t\tinserting to slot {slot}");
         let entry = &mut self.slots[slot];
 
         if !entry.packed_meta.is_unused() {

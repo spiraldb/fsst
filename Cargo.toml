@@ -26,7 +26,22 @@ use_debug = { level = "deny" }
 criterion = "0.5"
 lz4 = "1"
 
+[[example]]
+name = "round_trip"
+bench = false
+test = false
+
 [[bench]]
 name = "compress"
 harness = false
-bench = true
+
+# [profile.dev]
+# lto = "off"
+
+# [profile.release]
+# opt-level = 3
+# lto = "off"
+
+# [profile.bench]
+# opt-level = 3
+# lto = "thin"

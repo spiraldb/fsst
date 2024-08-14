@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![allow(unused)]
 #![doc = include_str!("../README.md")]
 
 /// Throw a compiler error if a type isn't guaranteed to have a specific size in bytes.
@@ -245,7 +246,7 @@ pub struct SymbolTable {
     // Index structures used to speedup building the symbol table and compression
     //
     /// Inverted index mapping 2-byte symbols to codes
-    codes_twobyte: [u16; 65_536],
+    codes_twobyte: Vec<u16>,
 
     /// Lossy perfect hash table for looking up codes to symbols that are 3 bytes or more
     lossy_pht: LossyPHT,
@@ -256,7 +257,7 @@ impl Default for SymbolTable {
         let mut table = Self {
             symbols: [Symbol::ZERO; 511],
             n_symbols: 0,
-            codes_twobyte: [0; 65_536],
+            codes_twobyte: vec![0; 65_536],
             lossy_pht: LossyPHT::new(),
         };
 
@@ -270,7 +271,7 @@ impl Default for SymbolTable {
             for second in 0..256 {
                 let index = (first << 8) | second;
                 // 511 is (first << 8) | ESCAPE_CODE
-                table.codes_twobyte[index as usize] = 511u16;
+                table.codes_twobyte[index as usize] = (first << 8) | (1 << 8) | 0xFF;
             }
         }
 
@@ -293,30 +294,11 @@ impl SymbolTable {
         let symbol_len = symbol.len();
         if symbol_len == 2 {
             // Speculatively insert the symbol into the twobyte cache
-            println!(
-                "inserting 2-byte symbol {:?}",
-                symbol
-                    .as_slice()
-                    .iter()
-                    .map(|c| *c as char)
-                    .collect::<Vec<char>>()
-            );
             self.codes_twobyte[symbol.first_two_bytes() as usize] = self.n_symbols as u16;
         } else if symbol_len >= 3 {
-            println!(
-                "inserting long symbol {:?}",
-                symbol
-                    .as_slice()
-                    .iter()
-                    .map(|c| *c as char)
-                    .collect::<Vec<char>>()
-            );
             // Attempt to insert larger symbols into the 3-byte cache
             if !self.lossy_pht.insert(symbol, self.n_symbols) {
-                println!("\t❌ insert failed");
                 return false;
-            } else {
-                println!("\t✅ insert successful");
             }
         }
 
@@ -344,31 +326,26 @@ impl SymbolTable {
     ///
     /// `in_ptr` and `out_ptr` must never be NULL or otherwise point to invalid memory.
     #[inline(never)]
-    pub(crate) unsafe fn compress_word(&self, word: u64, out_ptr: *mut u8) -> (usize, usize) {
-        println!(
-            "compress called: next word = {:?}",
-            word.to_le_bytes().map(|c| c as char)
-        );
-
+    pub(crate) unsafe fn compress_word(
+        &self,
+        word: u64,
+        out_ptr: *mut u8,
+        out_start: *mut u8,
+    ) -> (usize, usize) {
         // Speculatively write the first byte of `word` at offset 1. This is necessary if it is an escape, and
         // if it isn't, it will be overwritten anyway.
         //
         // SAFETY: caller ensures out_ptr is not null
         let first_byte = word as u8;
+        println!(
+            "WRITING out[{}] = {}",
+            out_ptr.byte_add(1).offset_from(out_start) as usize,
+            first_byte
+        );
         unsafe { out_ptr.byte_add(1).write_unaligned(first_byte) };
 
-        // Access the hash table, and see if we have a match.
+        // Probe the hash table
         let entry = self.lossy_pht.lookup(word);
-        println!(
-            "\tentry.symbol={:?} packed_meta: {:?}",
-            entry
-                .symbol
-                .as_slice()
-                .iter()
-                .map(|c| *c as char)
-                .collect::<Vec<char>>(),
-            entry.packed_meta
-        );
 
         // Now, downshift the `word` and the `entry` to see if they align.
         let ignored_bits = entry.packed_meta.ignored_bits();
@@ -383,26 +360,60 @@ impl SymbolTable {
         // if the shifted word and symbol match, we use it. Else, we use the precomputed twobyte code for this
         // byte sequence.
         let code = if entry.symbol.as_u64() == word_prefix && !entry.packed_meta.is_unused() {
-            println!("\t\tusing packed_meta.code");
+            // Show symbol as str
+            println!(
+                "  HIT emitting code for symbol {:?}",
+                entry
+                    .symbol
+                    .as_slice()
+                    .iter()
+                    .map(|c| *c as char)
+                    .collect::<Vec<char>>()
+            );
             entry.packed_meta.code() as u16
         } else {
-            println!(
-                "\t\tusing twobyte code: {:b}",
-                self.codes_twobyte[(word as u16) as usize]
-            );
+            let code = self.codes_twobyte[(word as u16) as usize];
+            println!("  MISS - code={:X?}", code);
+            if code >= 256 {
+                // It's an escape of the current word first byte.
+                println!(
+                    "  MISS - emitting escape for char '{}'",
+                    ((code >> 8) as u8 as char)
+                );
+            } else {
+                println!(
+                    "  MISS - emitting code {} for symbol {:?}",
+                    code,
+                    self.symbols[(256 + code) as usize]
+                        .as_slice()
+                        .iter()
+                        .map(|c| *c as char)
+                        .collect::<Vec<char>>(),
+                );
+            }
             self.codes_twobyte[(word as u16) as usize]
         };
         // Write the first byte of `code` to the output position.
         // The code will either by a real code with a single byte of padding, OR a two-byte code sequence.
+        println!(
+            "WRITING out[{}] = {}",
+            out_ptr.offset_from(out_start) as usize,
+            (code as u8)
+        );
         unsafe {
             out_ptr.write_unaligned(code as u8);
         };
 
-        // Seek the output pointer forward by howeer large the code was.
-        let advance_in = entry.symbol.len();
+        // Seek the pointers forward.
+        // NOTE: if the symbol is not a hit,
+        let advance_in = if entry.symbol.as_u64() == word_prefix && !entry.packed_meta.is_unused() {
+            entry.symbol.len()
+        } else {
+            1
+        };
         let advance_out = 1 + ((code >> 8) & 1) as usize;
+        println!("ADVANCE in={} out={} \n", advance_in, advance_out);
 
-        println!("\tresult: code={code:b}  advance_in={advance_in} advance_out={advance_out}");
         (advance_in, advance_out)
     }
 
@@ -412,6 +423,7 @@ impl SymbolTable {
 
         let mut in_ptr = plaintext.as_ptr();
         let mut out_ptr = values.as_mut_ptr();
+        let out_start = values.as_mut_ptr();
 
         // SAFETY: `end` will point just after the end of the `plaintext` slice.
         let in_end = unsafe { in_ptr.byte_add(plaintext.len()) };
@@ -420,50 +432,60 @@ impl SymbolTable {
         let out_end = unsafe { out_ptr.byte_add(values.capacity()) };
 
         while in_ptr < in_end_sub8 && out_ptr < out_end {
-            println!("FIRST LOOP");
             // SAFETY: pointer ranges are checked in the loop condition
             unsafe {
                 // Load a full 8-byte word of data from in_ptr.
                 // SAFETY: caller asserts in_ptr is not null. we may read past end of pointer though.
                 let word: u64 = (in_ptr as *const u64).read_unaligned();
-                let (advance_in, advance_out) = self.compress_word(word, out_ptr);
+                let (advance_in, advance_out) = self.compress_word(word, out_ptr, out_start);
                 in_ptr = in_ptr.byte_add(advance_in);
                 out_ptr = out_ptr.byte_add(advance_out);
             };
         }
 
         let remaining_bytes = unsafe { in_end.byte_offset_from(in_ptr) };
-        // Shift the mask down by the number of bytes each time.
-        // The shift amount will start at 0, and increase each time.
+        assert!(
+            remaining_bytes.is_positive(),
+            "in_ptr exceeded in_end, should not be possible"
+        );
 
-        // Shift off the remaining bytes, if not none
-        let mut mask: u64 = if remaining_bytes == 8 {
-            u64::MAX
-        } else {
-            u64::MAX >> (64 - 8 * remaining_bytes)
-        };
+        // Shift off the remaining bytes
+        let mut last_word = unsafe { (in_ptr as *const u64).read_unaligned() };
+        last_word = mask_prefix(last_word, remaining_bytes as usize);
 
         while in_ptr < in_end && out_ptr < out_end {
-            println!("SECOND LOOP");
             unsafe {
                 // Load a full 8-byte word of data from in_ptr.
                 // SAFETY: caller asserts in_ptr is not null. we may read past end of pointer though.
-                let word: u64 = (in_ptr as *const u64).read_unaligned();
-                let (advance_in, advance_out) = self.compress_word(word & mask, out_ptr);
+                let (advance_in, advance_out) = self.compress_word(last_word, out_ptr, out_start);
                 in_ptr = in_ptr.byte_add(advance_in);
                 out_ptr = out_ptr.byte_add(advance_out);
-                mask = mask >> (8 * advance_in);
+
+                last_word = advance_8byte_word(last_word, advance_in);
             }
         }
 
         // in_ptr should have exceeded in_end
         assert!(in_ptr >= in_end, "exhausted output buffer before exhausting input, there is a bug in SymbolTable::compress()");
 
+        // Count the number of bytes written
+        // SAFETY: assertion
+        unsafe {
+            let bytes_written = out_ptr.offset_from(values.as_ptr());
+            assert!(
+                bytes_written.is_positive(),
+                "out_ptr ended before it started, not possible"
+            );
+
+            values.set_len(bytes_written as usize);
+        }
+
         values
     }
 
     /// Decompress a byte slice that was previously returned by [compression][Self::compress].
     pub fn decompress(&self, compressed: &[u8]) -> Vec<u8> {
+        print_compressed(compressed);
         let mut decoded: Vec<u8> = Vec::with_capacity(size_of::<Symbol>() * compressed.len());
         let ptr = decoded.as_mut_ptr();
 
@@ -505,4 +527,63 @@ impl SymbolTable {
 
         decoded
     }
+}
+
+/// Mask the word, keeping only the `prefix_bytes` front.
+fn mask_prefix(word: u64, prefix_bytes: usize) -> u64 {
+    let mask = if prefix_bytes == 0 {
+        0
+    } else {
+        u64::MAX >> 8 * (8 - prefix_bytes)
+    };
+
+    word & mask
+}
+
+fn advance_8byte_word(word: u64, bytes: usize) -> u64 {
+    // shift the word off the right-end, because little endian means the first
+    // char is stored in the LSB.
+    //
+    // Note that even though this looks like it branches, Rust compiles this to a
+    // conditional move instruction. See `<https://godbolt.org/z/Pbvre65Pq>`
+    if bytes == 8 {
+        0
+    } else {
+        word >> 8 * bytes
+    }
+}
+
+pub fn advance_8byte_word_bits(word: u64, bits: usize) -> u64 {
+    // shift the word off the right-end, because little endian means the first
+    // char is stored in the LSB.
+    //
+    // Note that even though this looks like it branches, Rust compiles this to a
+    // conditional move instruction. See `<https://godbolt.org/z/Pbvre65Pq>`
+    if bits == 64 {
+        0
+    } else {
+        word >> bits
+    }
+}
+
+// fn print_word<T>(addr: *const T) -> String {
+//     let word = unsafe { (addr as *const u64).read_unaligned() };
+//     format!("{:?}", word.to_le_bytes().map(|c| c as char))
+// }
+
+fn print_compressed(block: &[u8]) {
+    let mut repr = Vec::new();
+    let mut idx = 0;
+    while idx < block.len() {
+        let byte = block[idx];
+        if byte == Code::ESCAPE_CODE {
+            repr.push("ESCAPE".to_string());
+            idx += 1;
+            repr.push(format!("'{}'", block[idx] as char));
+        } else {
+            repr.push(format!("{}", block[idx]));
+        }
+        idx += 1;
+    }
+    println!("compressed: {:?}", repr);
 }
