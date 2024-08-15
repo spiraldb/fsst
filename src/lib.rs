@@ -76,10 +76,7 @@ impl Symbol {
 
     /// Get the first byte of the symbol as a `u8`.
     ///
-    /// # Safety
-    /// The function will never panic, but if the symbol's len is < 1, the
-    /// result may be meaningless. It is up to the caller to ensure that
-    /// the first byte of the symbol contains valid data.
+    /// If the symbol is empty, this will return the zero byte.
     #[inline]
     pub fn first_byte(&self) -> u8 {
         // SAFETY: the bytes can always be viewed as a u64
@@ -88,10 +85,7 @@ impl Symbol {
 
     /// Get the first two bytes of the symbol as a `u16`.
     ///
-    /// # Safety
-    /// The function will never panic, but if the symbol's len is < 2, the
-    /// result may be meaningless. It is up to the caller to ensure that
-    /// the first two bytes of the symbol contain valid data.
+    /// If the Symbol is one or zero bytes, this will return `0u16`.
     #[inline]
     pub fn first_two_bytes(&self) -> u16 {
         // SAFETY: the bytes can always be viewed as a u64

@@ -4,9 +4,14 @@
 //!
 //! The first is the file to train a symbol table on.
 //!
-//! The second is the file to compress. The compressed file will be written
-//! as a sibling with the suffix ".fsst"
-
+//! The second is the file to compress. The compressor will run and compress
+//! in chunks of 16MB, logging the compression ratio for each chunk.
+//!
+//! Example:
+//!
+//! ```
+//! cargo run --release --example file_compressor -- file1.csv file2.csv
+//! ```
 use std::{
     fs::File,
     io::Read,
