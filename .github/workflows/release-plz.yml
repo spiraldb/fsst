@@ -5,10 +5,10 @@ permissions:
   contents: write
 
 # TODO(aduffy): uncomment when we're ready to publish
-on: {}
-  #   push:
-  #     branches:
-  #       - develop
+on:
+  push:
+    branches:
+      - develop
 
 jobs:
   release-plz:
