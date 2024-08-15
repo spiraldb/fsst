@@ -305,7 +305,8 @@ impl SymbolTable {
     /// # Safety
     ///
     /// `in_ptr` and `out_ptr` must never be NULL or otherwise point to invalid memory.
-    #[inline(never)]
+    // NOTE(aduffy): uncomment this line to make the function appear in profiles
+    // #[inline(never)]
     pub(crate) unsafe fn compress_word(&self, word: u64, out_ptr: *mut u8) -> (usize, usize) {
         // Speculatively write the first byte of `word` at offset 1. This is necessary if it is an escape, and
         // if it isn't, it will be overwritten anyway.
