@@ -1,3 +1,5 @@
+![FSST](./logo.webp)
+
 # fsst-rs
 
 A pure-Rust, zero-dependency implementation of the [FSST string compression algorithm][whitepaper].
