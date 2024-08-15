@@ -5,11 +5,8 @@
 //! Also contains LZ4 baseline.
 #![allow(missing_docs)]
 use core::str;
-use std::io::{Cursor, Read, Write};
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use lz4::liblz4::BlockChecksum;
-use lz4::{BlockSize, ContentChecksum};
 
 use fsst_rs::{train, ESCAPE_CODE};
 
@@ -48,40 +45,5 @@ fn bench_fsst(c: &mut Criterion) {
     });
 }
 
-fn bench_lz4(c: &mut Criterion) {
-    let mut group = c.benchmark_group("lz4");
-
-    group.bench_function("compress-single", |b| {
-        let mut compressed = Vec::with_capacity(100_000_000);
-        let mut encoder = lz4::EncoderBuilder::new()
-            .block_size(BlockSize::Max64KB)
-            .checksum(ContentChecksum::NoChecksum)
-            .block_checksum(BlockChecksum::NoBlockChecksum)
-            .build(&mut compressed)
-            .unwrap();
-
-        b.iter(|| encoder.write_all(TEST.as_bytes()).unwrap());
-    });
-
-    group.bench_function("decompress-single", |b| {
-        let compressed = Vec::new();
-        let mut encoder = lz4::EncoderBuilder::new()
-            .block_size(BlockSize::Max64KB)
-            .checksum(ContentChecksum::NoChecksum)
-            .block_checksum(BlockChecksum::NoBlockChecksum)
-            .build(compressed)
-            .unwrap();
-        encoder.write_all(TEST.as_bytes()).unwrap();
-        let (compressed, result) = encoder.finish();
-        result.unwrap();
-
-        let cursor = Cursor::new(compressed);
-        let mut decoder = lz4::Decoder::new(cursor).unwrap();
-        let mut output = Vec::new();
-
-        b.iter(|| decoder.read_to_end(&mut output).unwrap());
-    });
-}
-
-criterion_group!(compress_bench, bench_fsst, bench_lz4);
+criterion_group!(compress_bench, bench_fsst);
 criterion_main!(compress_bench);

@@ -103,7 +103,7 @@ impl SymbolTable {
     fn optimize(&self, counters: Counter) -> Self {
         let mut res = SymbolTable::default();
         let mut pqueue = BinaryHeap::new();
-        for code1 in 0..511 {
+        for code1 in 0u16..(256u16 + self.n_symbols as u16) {
             let symbol1 = self.symbols[code1 as usize];
             let gain = counters.count1(code1) * symbol1.len();
             pqueue.push(Candidate {
@@ -111,11 +111,11 @@ impl SymbolTable {
                 gain,
             });
 
-            for code2 in 0..511 {
+            for code2 in 0u16..(256u16 + self.n_symbols as u16) {
                 let symbol2 = &self.symbols[code2 as usize];
                 // If either symbol is zero-length, or if merging would yield a symbol of
                 // length greater than 8, skip.
-                if symbol1.len() + symbol2.len() >= 8 || symbol1.is_empty() || symbol2.is_empty() {
+                if symbol1.len() + symbol2.len() >= 8 {
                     continue;
                 }
                 let new_symbol = symbol1.concat(symbol2);

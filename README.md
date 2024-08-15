@@ -11,6 +11,7 @@ but it is mostly written from a careful reading of the paper.
 
 **NOTE: This current implementation is still in-progress and is not production ready, please use at your own risk.**
 
+**NOTE: This crate only works on little-endian architectures currently. There are no current plans to support big-endian targets.**
 
 [whitepaper]: https://www.vldb.org/pvldb/vol13/p2649-boncz.pdf
 [MIT-licensed implementation]: https://github.com/cwida/fsst

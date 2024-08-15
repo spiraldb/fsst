@@ -15,7 +15,7 @@ impl FindLongestSymbol for SymbolTable {
         // Start with the code corresponding to the escape of the first character in the text
         let mut best_code = text[0] as u16;
         let mut best_overlap = 1;
-        for code in 256..511 {
+        for code in 256..(256 + self.n_symbols as u16) {
             let symbol = &self.symbols[code as usize];
             if symbol.is_prefix(text) && symbol.len() > best_overlap {
                 best_code = code;

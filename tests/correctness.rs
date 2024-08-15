@@ -1,5 +1,7 @@
 #![cfg(test)]
 
+use fsst_rs::Symbol;
+
 static PREAMBLE: &str = r#"
 When in the Course of human events, it becomes necessary for one people to dissolve
 the political bands which have connected them with another, and to assume among the
@@ -8,6 +10,8 @@ of Nature's God entitle them, a decent respect to the opinions of mankind requir
 that they should declare the causes which impel them to the separation."#;
 
 static DECLARATION: &str = include_str!("./fixtures/declaration.txt");
+
+static ART_OF_WAR: &str = include_str!("./fixtures/art_of_war.txt");
 
 #[test]
 fn test_basic() {
@@ -27,6 +31,18 @@ fn test_train_on_empty() {
         trained.decompress(&compressed),
         "the quick brown fox jumped over the lazy dog".as_bytes()
     );
+}
+
+#[test]
+fn test_one_byte() {
+    let mut empty = fsst_rs::SymbolTable::default();
+    // Assign code 0 to map to the symbol containing byte 0x01
+    empty.insert(Symbol::from_u8(0x01));
+
+    let compressed = empty.compress(&[0x01]);
+    assert_eq!(compressed, vec![0u8]);
+
+    assert_eq!(empty.decompress(&compressed), vec![0x01]);
 }
 
 #[test]
@@ -56,4 +72,13 @@ fn test_large() {
     }
     let compressed = trained.compress(massive.as_bytes());
     assert_eq!(trained.decompress(&compressed), massive.as_bytes());
+}
+
+#[test]
+fn test_chinese() {
+    let trained = fsst_rs::train(ART_OF_WAR.as_bytes());
+    assert_eq!(
+        ART_OF_WAR.as_bytes(),
+        trained.decompress(&trained.compress(ART_OF_WAR.as_bytes()))
+    );
 }
