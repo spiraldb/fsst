@@ -209,7 +209,7 @@ impl Debug for CodeMeta {
 /// The static symbol table used for compression and decompression.
 ///
 /// The `SymbolTable` is the central component of FSST. You can create a SymbolTable either by
-/// default, or by [training] it on an input corpus of text.
+/// default, or by [training][`crate::train`] it on an input corpus of text.
 ///
 /// Example usage:
 ///
@@ -223,8 +223,6 @@ impl Debug for CodeMeta {
 /// let compressed = table.compress("hello".as_bytes());
 /// assert_eq!(compressed, vec![0u8]);
 /// ```
-///
-/// [training]: [`train`]
 #[derive(Clone)]
 pub struct SymbolTable {
     /// Table mapping codes to symbols.
