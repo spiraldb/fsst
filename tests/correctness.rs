@@ -1,5 +1,7 @@
 #![cfg(test)]
 
+use fsst_rs::Symbol;
+
 static PREAMBLE: &str = r#"
 When in the Course of human events, it becomes necessary for one people to dissolve
 the political bands which have connected them with another, and to assume among the
@@ -27,6 +29,18 @@ fn test_train_on_empty() {
         trained.decompress(&compressed),
         "the quick brown fox jumped over the lazy dog".as_bytes()
     );
+}
+
+#[test]
+fn test_one_byte() {
+    let mut empty = fsst_rs::SymbolTable::default();
+    // Assign code 0 to map to the symbol containing byte 0x01
+    empty.insert(Symbol::from_u8(0x01));
+
+    let compressed = empty.compress(&[0x01]);
+    assert_eq!(compressed, vec![0u8]);
+
+    assert_eq!(empty.decompress(&compressed), vec![0x01]);
 }
 
 #[test]

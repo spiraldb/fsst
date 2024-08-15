@@ -115,7 +115,7 @@ impl SymbolTable {
                 let symbol2 = &self.symbols[code2 as usize];
                 // If either symbol is zero-length, or if merging would yield a symbol of
                 // length greater than 8, skip.
-                if symbol1.len() + symbol2.len() >= 8 || symbol1.is_empty() || symbol2.is_empty() {
+                if symbol1.len() + symbol2.len() >= 8 {
                     continue;
                 }
                 let new_symbol = symbol1.concat(symbol2);

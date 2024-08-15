@@ -1,4 +1,5 @@
 #![doc = include_str!("../README.md")]
+#![cfg(target_endian = "little")]
 
 /// Throw a compiler error if a type isn't guaranteed to have a specific size in bytes.
 macro_rules! assert_sizeof {
@@ -49,10 +50,12 @@ impl Symbol {
 }
 
 impl Symbol {
-    /// Calculate the length of the symbol in bytes.
+    /// Calculate the length of the symbol in bytes. Always a value between 1 and 8.
     ///
     /// Each symbol has the capacity to hold up to 8 bytes of data, but the symbols
-    /// can contain fewer bytes, padded with 0x00.
+    /// can contain fewer bytes, padded with 0x00. There is a special case of a symbol
+    /// that holds the byte 0x00. In that case, the symbol contains `0x0000000000000000`
+    /// but we want to interpret that as a one-byte symbol containing `0x00`.
     pub fn len(&self) -> usize {
         let numeric = unsafe { self.num };
         // For little-endian platforms, this counts the number of *trailing* zeros
@@ -113,10 +116,10 @@ impl Symbol {
 
     /// Return a new `Symbol` by logically concatenating ourselves with another `Symbol`.
     pub fn concat(&self, other: &Self) -> Self {
-        let new_len = self.len() + other.len();
+        let self_len = self.len();
+        let new_len = self_len + other.len();
         assert!(new_len <= 8, "cannot build symbol with length > 8");
 
-        let self_len = self.len();
         let mut result = *self;
 
         // SAFETY: self_len and new_len are checked to be <= 8
@@ -421,13 +424,13 @@ impl SymbolTable {
 
     /// Decompress a byte slice that was previously returned by [compression][Self::compress].
     pub fn decompress(&self, compressed: &[u8]) -> Vec<u8> {
-        let mut decoded: Vec<u8> = Vec::with_capacity(size_of::<Symbol>() * compressed.len());
+        let mut decoded: Vec<u8> = Vec::with_capacity(size_of::<Symbol>() * (compressed.len() + 1));
         let ptr = decoded.as_mut_ptr();
 
         let mut in_pos = 0;
         let mut out_pos = 0;
 
-        while in_pos < compressed.len() && out_pos < (decoded.capacity() + size_of::<Symbol>()) {
+        while in_pos < compressed.len() && out_pos < (decoded.capacity() - size_of::<Symbol>()) {
             let code = compressed[in_pos];
             if code == ESCAPE_CODE {
                 // Advance by one, do raw write.

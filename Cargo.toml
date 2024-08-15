@@ -24,7 +24,6 @@ use_debug = { level = "deny" }
 
 [dev-dependencies]
 criterion = "0.5"
-lz4 = "1"
 
 [[example]]
 name = "round_trip"
