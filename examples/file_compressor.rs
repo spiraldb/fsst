@@ -26,14 +26,14 @@ fn main() {
     let train_path = Path::new(&args[0]);
     let input_path = Path::new(&args[1]);
 
-    let mut train_text = String::new();
+    let mut train_bytes = Vec::new();
     {
         let mut f = File::open(train_path).unwrap();
-        f.read_to_string(&mut train_text).unwrap();
+        f.read_to_end(&mut train_bytes).unwrap();
     }
 
     println!("building the compressor from {train_path:?}...");
-    let compressor = fsst_rs::train(&train_text);
+    let compressor = fsst_rs::train(&train_bytes);
 
     println!("compressing blocks of {input_path:?} with compressor...");
 
