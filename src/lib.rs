@@ -388,18 +388,9 @@ impl SymbolTable {
         );
         let remaining_bytes = remaining_bytes as usize;
 
-        // Shift off the remaining bytes
-        // Read the remaining bytes
-        // Unroll and test multiple values being written here.
-        // let mut last_word = [0u8; 8];
-        // for i in 0..remaining_bytes {
-        //     last_word[i as usize] = unsafe { in_ptr.byte_add(i as usize).read() };
-        // }
-
-        // Shift on the words from the remaining bytes.
-        // let mut last_word = unsafe { (in_ptr as *const u64).read_unaligned() };
-        // last_word = mask_prefix(last_word, remaining_bytes as usize);
-        // let mut last_word = u64::from_le_bytes(last_word);
+        // Load the last `remaining_byte`s of data into a final world. We then replicate the loop above,
+        // but shift data out of this word rather than advancing an input pointer and potentially reading
+        // unowned memory.
         let mut last_word = unsafe {
             match remaining_bytes {
                 0 => 0,
@@ -513,6 +504,9 @@ fn compare_masked(left: u64, right: u64, ignored_bits: u16) -> bool {
     (left & mask) == right
 }
 
+/// This is a function that will get monomorphized based on the value of `N` to do
+/// a load of `N` values from the pointer in a minimum number of instructions into
+/// an output `u64`.
 unsafe fn extract_u64<const N: usize>(ptr: *const u8) -> u64 {
     match N {
         1 => ptr.read() as u64,
@@ -522,9 +516,7 @@ unsafe fn extract_u64<const N: usize>(ptr: *const u8) -> u64 {
             let high = (ptr.byte_add(1) as *const u16).read_unaligned() as u64;
             high << 8 | low
         }
-        4 => {
-            return (ptr as *const u32).read_unaligned() as u64;
-        }
+        4 => (ptr as *const u32).read_unaligned() as u64,
         5 => {
             let low = (ptr as *const u32).read_unaligned() as u64;
             let high = ptr.byte_add(4).read() as u64;
@@ -541,7 +533,7 @@ unsafe fn extract_u64<const N: usize>(ptr: *const u8) -> u64 {
             let high = ptr.byte_add(6).read() as u64;
             (high << 48) | (mid << 32) | low
         }
-        8 => (ptr as *const u64).read_unaligned() as u64,
+        8 => (ptr as *const u64).read_unaligned(),
         _ => unreachable!("N must be <= 8"),
     }
 }

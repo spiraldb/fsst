@@ -48,7 +48,7 @@ fn test_one_byte() {
 #[test]
 fn test_zeros() {
     println!("training zeros");
-    let training_data: Vec<u8> = vec![0, 1, 2, 3, 4];
+    let training_data: Vec<u8> = vec![0, 1, 2, 3, 4, 0];
     let trained = fsst_rs::train(&training_data);
     println!("compressing with zeros");
     let compressed = trained.compress(&[0, 4]);
