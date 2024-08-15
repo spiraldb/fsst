@@ -58,7 +58,14 @@ impl Symbol {
         // For little-endian platforms, this counts the number of *trailing* zeros
         let null_bytes = (numeric.leading_zeros() >> 3) as usize;
 
-        size_of::<Self>() - null_bytes
+        // Special case handling of a symbol with all-zeros. This is actually
+        // a 1-byte symbol containing 0x00.
+        let len = size_of::<Self>() - null_bytes;
+        if len == 0 {
+            1
+        } else {
+            len
+        }
     }
 
     /// Returns true if the symbol does not encode any bytes.
@@ -298,9 +305,9 @@ impl SymbolTable {
     ///
     /// # Safety
     ///
-    /// `in_ptr` and `out_ptr` must never be NULL or otherwise point to invalid memory.
+    /// `out_ptr` must never be NULL or otherwise point to invalid memory.
     // NOTE(aduffy): uncomment this line to make the function appear in profiles
-    // #[inline(never)]
+    #[inline(never)]
     pub(crate) unsafe fn compress_word(&self, word: u64, out_ptr: *mut u8) -> (usize, usize) {
         // Speculatively write the first byte of `word` at offset 1. This is necessary if it is an escape, and
         // if it isn't, it will be overwritten anyway.

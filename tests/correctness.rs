@@ -29,17 +29,17 @@ fn test_train_on_empty() {
     );
 }
 
-// #[test]
-// fn test_zeros() {
-//     println!("training zeros");
-//     let training_data: Vec<u8> = vec![0, 1, 2, 3, 4];
-//     let trained = fsst_rs::train(&training_data);
-//     println!("compressing with zeros");
-//     let compressed = trained.compress(&[0, 4]);
-//     println!("decomperssing with zeros");
-//     assert_eq!(trained.decompress(&compressed), &[0, 4]);
-//     println!("done");
-// }
+#[test]
+fn test_zeros() {
+    println!("training zeros");
+    let training_data: Vec<u8> = vec![0, 1, 2, 3, 4];
+    let trained = fsst_rs::train(&training_data);
+    println!("compressing with zeros");
+    let compressed = trained.compress(&[0, 4]);
+    println!("decomperssing with zeros");
+    assert_eq!(trained.decompress(&compressed), &[0, 4]);
+    println!("done");
+}
 
 #[test]
 fn test_large() {
