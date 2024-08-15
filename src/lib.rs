@@ -1,17 +1,3 @@
-// Copyright 2024 Spiral, Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-// http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 #![doc = include_str!("../README.md")]
 
 /// Throw a compiler error if a type isn't guaranteed to have a specific size in bytes.
@@ -226,7 +212,9 @@ impl Debug for CodeMeta {
 /// ```
 /// use fsst_rs::{Symbol, SymbolTable};
 /// let mut table = SymbolTable::default();
-/// table.insert(Symbol::from_slice(&[b'h', b'e', b'l', b'l', b'o', 0, 0, 0]));
+///
+/// // Insert a new symbol
+/// assert!(table.insert(Symbol::from_slice(&[b'h', b'e', b'l', b'l', b'o', 0, 0, 0])));
 ///
 /// let compressed = table.compress("hello".as_bytes());
 /// assert_eq!(compressed, vec![0u8]);
@@ -290,6 +278,7 @@ impl SymbolTable {
         } else if symbol_len >= 3 {
             // Attempt to insert larger symbols into the 3-byte cache
             if !self.lossy_pht.insert(symbol, self.n_symbols) {
+                println!("table insert rejected");
                 return false;
             }
         }
