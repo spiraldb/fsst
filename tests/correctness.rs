@@ -11,6 +11,8 @@ that they should declare the causes which impel them to the separation."#;
 
 static DECLARATION: &str = include_str!("./fixtures/declaration.txt");
 
+static ART_OF_WAR: &str = include_str!("./fixtures/art_of_war.txt");
+
 #[test]
 fn test_basic() {
     // Roundtrip the declaration
@@ -70,4 +72,13 @@ fn test_large() {
     }
     let compressed = trained.compress(massive.as_bytes());
     assert_eq!(trained.decompress(&compressed), massive.as_bytes());
+}
+
+#[test]
+fn test_chinese() {
+    let trained = fsst_rs::train(ART_OF_WAR.as_bytes());
+    assert_eq!(
+        ART_OF_WAR.as_bytes(),
+        trained.decompress(&trained.compress(ART_OF_WAR.as_bytes()))
+    );
 }

@@ -293,16 +293,15 @@ impl SymbolTable {
         true
     }
 
-    /// Using the symbol table, runs a single cycle of compression from the front of `in_ptr`, writing
-    /// the output into `out_ptr`. Attempts to process an entire 64-bit word of prefix from `in_ptr`.
+    /// Using the symbol table, runs a single cycle of compression on an input word, writing
+    /// the output into `out_ptr`.
     ///
     /// # Returns
     ///
-    /// This function returns a tuple of (code, advance_in, advance_out).
+    /// This function returns a tuple of (advance_in, advance_out) with the number of bytes
+    /// for the caller to advance the input and output pointers.
     ///
-    /// `code` is the code that was emitted into the output buffer.
-    ///
-    /// `advance_in` is the number of bytes to advance `in_ptr` before the next call.
+    /// `advance_in` is the number of bytes to advance the input pointer before the next call.
     ///
     /// `advance_out` is the number of bytes to advance `out_ptr` before the next call.
     ///
