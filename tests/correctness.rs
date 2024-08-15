@@ -43,7 +43,6 @@ fn test_train_on_empty() {
 
 #[test]
 fn test_large() {
-    // Generate 100KB of test data
     let mut corpus = String::new();
     // TODO(aduffy): make this larger once table build performance is better.
     while corpus.len() < 10 * 1_024 {
@@ -51,6 +50,10 @@ fn test_large() {
     }
 
     let trained = fsst_rs::train(&corpus);
-    let compressed = trained.compress(corpus.as_bytes());
-    assert_eq!(trained.decompress(&compressed), corpus.as_bytes());
+    let mut massive = String::new();
+    while massive.len() < 16 * 1_024 * 1_024 {
+        massive.push_str(DECLARATION);
+    }
+    let compressed = trained.compress(massive.as_bytes());
+    assert_eq!(trained.decompress(&compressed), massive.as_bytes());
 }

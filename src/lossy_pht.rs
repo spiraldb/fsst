@@ -11,7 +11,7 @@ use crate::MAX_CODE;
 /// vendors split the L1 cache into 32KB of instruction and 32KB of data.
 pub const HASH_TABLE_SIZE: usize = 1 << 11;
 
-/// A single entry in the [`SymbolTable`].
+/// A single entry in the [Lossy Perfect Hash Table][`LossyPHT`].
 ///
 /// `TableEntry` is based on the `Symbol` class outlined in Algorithm 4 of the FSST paper. See
 /// the module documentation for a link to the paper.
