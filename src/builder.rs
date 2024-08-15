@@ -7,7 +7,8 @@
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
-use crate::{Code, Symbol, SymbolTable};
+use crate::find_longest::FindLongestSymbol;
+use crate::{Symbol, SymbolTable, MAX_CODE};
 
 #[derive(Debug, Clone)]
 struct Counter {
@@ -21,29 +22,29 @@ struct Counter {
 impl Counter {
     fn new() -> Self {
         Self {
-            counts1: vec![0; Code::CODE_MAX as usize],
-            counts2: vec![vec![0; Code::CODE_MAX as usize]; Code::CODE_MAX as usize],
+            counts1: vec![0; MAX_CODE as usize],
+            counts2: vec![vec![0; MAX_CODE as usize]; MAX_CODE as usize],
         }
     }
 
     #[inline]
-    fn record_count1(&mut self, code1: Code) {
-        self.counts1[code1.0 as usize] += 1;
+    fn record_count1(&mut self, code1: u16) {
+        self.counts1[code1 as usize] += 1;
     }
 
     #[inline]
-    fn record_count2(&mut self, code1: Code, code2: Code) {
-        self.counts2[code1.0 as usize][code2.0 as usize] += 1;
+    fn record_count2(&mut self, code1: u16, code2: u16) {
+        self.counts2[code1 as usize][code2 as usize] += 1;
     }
 
     #[inline]
-    fn count1(&self, code: Code) -> usize {
-        self.counts1[code.0 as usize]
+    fn count1(&self, code: u16) -> usize {
+        self.counts1[code as usize]
     }
 
     #[inline]
-    fn count2(&self, code1: Code, code2: Code) -> usize {
-        self.counts2[code1.0 as usize][code2.0 as usize]
+    fn count2(&self, code1: u16, code2: u16) -> usize {
+        self.counts2[code1 as usize][code2 as usize]
     }
 }
 
@@ -65,6 +66,9 @@ pub fn train(corpus: impl AsRef<[u8]>) -> SymbolTable {
     let mut table = SymbolTable::default();
     // TODO(aduffy): handle truncating/sampling if corpus > requires sample size.
     let sample = corpus.as_ref();
+    if sample.is_empty() {
+        return table;
+    }
     for _generation in 0..MAX_GENERATIONS {
         let counter = table.compress_count(sample);
         table = table.optimize(counter);
@@ -81,13 +85,13 @@ impl SymbolTable {
         let len = sample.len();
         let mut prev_code = self.find_longest_symbol(sample);
         counter.record_count1(prev_code);
-        let mut pos = self.symbols[prev_code.0 as usize].len();
+        let mut pos = self.symbols[prev_code as usize].len();
 
         while pos < len {
             let code = self.find_longest_symbol(&sample[pos..len]);
             counter.record_count1(code);
             counter.record_count2(prev_code, code);
-            pos += self.symbols[code.0 as usize].len();
+            pos += self.symbols[code as usize].len();
             prev_code = code;
         }
 
@@ -100,8 +104,7 @@ impl SymbolTable {
         let mut res = SymbolTable::default();
         let mut pqueue = BinaryHeap::new();
         for code1 in 0..511 {
-            let code1 = Code::from_u16(code1);
-            let symbol1 = self.symbols[code1.0 as usize];
+            let symbol1 = self.symbols[code1 as usize];
             let gain = counters.count1(code1) * symbol1.len();
             pqueue.push(Candidate {
                 symbol: symbol1,
@@ -109,8 +112,7 @@ impl SymbolTable {
             });
 
             for code2 in 0..511 {
-                let code2 = Code::from_u16(code2);
-                let symbol2 = &self.symbols[code2.0 as usize];
+                let symbol2 = &self.symbols[code2 as usize];
                 // If either symbol is zero-length, or if merging would yield a symbol of
                 // length greater than 8, skip.
                 if symbol1.len() + symbol2.len() >= 8 || symbol1.is_empty() || symbol2.is_empty() {
@@ -133,10 +135,13 @@ impl SymbolTable {
         }
 
         // Pop the 255 best symbols.
-        pqueue
-            .iter()
-            .take(255)
-            .for_each(|candidate| res.insert(candidate.symbol));
+        let mut n_symbols = 0;
+        while !pqueue.is_empty() && n_symbols < 255 {
+            let candidate = pqueue.pop().unwrap();
+            if res.insert(candidate.symbol) {
+                n_symbols += 1;
+            }
+        }
 
         res
     }
@@ -181,7 +186,7 @@ impl Ord for Candidate {
 
 #[cfg(test)]
 mod test {
-    use crate::{train, Code};
+    use crate::{train, ESCAPE_CODE};
 
     #[test]
     fn test_builder() {
@@ -193,26 +198,26 @@ mod test {
         let compressed = table.compress(text.as_bytes());
 
         // Ensure that the compressed string has no escape bytes
-        assert!(compressed.iter().all(|b| *b != Code::ESCAPE_CODE));
+        assert!(compressed.iter().all(|b| *b != ESCAPE_CODE));
 
-        // Ensure that we can compress a string with no values seen at training time.
+        // Ensure that we can compress a string with no values seen at training time, with escape bytes
         let compressed = table.compress("xyz123".as_bytes());
         assert_eq!(
             compressed,
             vec![
-                Code::ESCAPE_CODE,
+                ESCAPE_CODE,
                 b'x',
-                Code::ESCAPE_CODE,
+                ESCAPE_CODE,
                 b'y',
-                Code::ESCAPE_CODE,
+                ESCAPE_CODE,
                 b'z',
-                Code::ESCAPE_CODE,
+                ESCAPE_CODE,
                 b'1',
-                Code::ESCAPE_CODE,
+                ESCAPE_CODE,
                 b'2',
-                Code::ESCAPE_CODE,
+                ESCAPE_CODE,
                 b'3',
             ]
-        )
+        );
     }
 }
