@@ -386,10 +386,34 @@ impl SymbolTable {
             remaining_bytes.is_positive(),
             "in_ptr exceeded in_end, should not be possible"
         );
+        let remaining_bytes = remaining_bytes as usize;
 
         // Shift off the remaining bytes
-        let mut last_word = unsafe { (in_ptr as *const u64).read_unaligned() };
-        last_word = mask_prefix(last_word, remaining_bytes as usize);
+        // Read the remaining bytes
+        // Unroll and test multiple values being written here.
+        // let mut last_word = [0u8; 8];
+        // for i in 0..remaining_bytes {
+        //     last_word[i as usize] = unsafe { in_ptr.byte_add(i as usize).read() };
+        // }
+
+        // Shift on the words from the remaining bytes.
+        // let mut last_word = unsafe { (in_ptr as *const u64).read_unaligned() };
+        // last_word = mask_prefix(last_word, remaining_bytes as usize);
+        // let mut last_word = u64::from_le_bytes(last_word);
+        let mut last_word = unsafe {
+            match remaining_bytes {
+                0 => 0,
+                1 => extract_u64::<1>(in_ptr),
+                2 => extract_u64::<2>(in_ptr),
+                3 => extract_u64::<3>(in_ptr),
+                4 => extract_u64::<4>(in_ptr),
+                5 => extract_u64::<5>(in_ptr),
+                6 => extract_u64::<6>(in_ptr),
+                7 => extract_u64::<7>(in_ptr),
+                8 => extract_u64::<8>(in_ptr),
+                _ => unreachable!("remaining bytes must be <= 8"),
+            }
+        };
 
         while in_ptr < in_end && out_ptr < out_end {
             unsafe {
@@ -466,17 +490,6 @@ impl SymbolTable {
     }
 }
 
-/// Mask the word, keeping only the `prefix_bytes` front.
-fn mask_prefix(word: u64, prefix_bytes: usize) -> u64 {
-    let mask = if prefix_bytes == 0 {
-        0
-    } else {
-        u64::MAX >> (8 * (8 - prefix_bytes))
-    };
-
-    word & mask
-}
-
 fn advance_8byte_word(word: u64, bytes: usize) -> u64 {
     // shift the word off the right-end, because little endian means the first
     // char is stored in the LSB.
@@ -498,4 +511,37 @@ fn compare_masked(left: u64, right: u64, ignored_bits: u16) -> bool {
     };
 
     (left & mask) == right
+}
+
+unsafe fn extract_u64<const N: usize>(ptr: *const u8) -> u64 {
+    match N {
+        1 => ptr.read() as u64,
+        2 => (ptr as *const u16).read_unaligned() as u64,
+        3 => {
+            let low = ptr.read() as u64;
+            let high = (ptr.byte_add(1) as *const u16).read_unaligned() as u64;
+            high << 8 | low
+        }
+        4 => {
+            return (ptr as *const u32).read_unaligned() as u64;
+        }
+        5 => {
+            let low = (ptr as *const u32).read_unaligned() as u64;
+            let high = ptr.byte_add(4).read() as u64;
+            high << 32 | low
+        }
+        6 => {
+            let low = (ptr as *const u32).read_unaligned() as u64;
+            let high = (ptr.byte_add(4) as *const u16).read_unaligned() as u64;
+            high << 32 | low
+        }
+        7 => {
+            let low = (ptr as *const u32).read_unaligned() as u64;
+            let mid = (ptr.byte_add(4) as *const u16).read_unaligned() as u64;
+            let high = ptr.byte_add(6).read() as u64;
+            (high << 48) | (mid << 32) | low
+        }
+        8 => (ptr as *const u64).read_unaligned() as u64,
+        _ => unreachable!("N must be <= 8"),
+    }
 }
