@@ -1,4 +1,4 @@
-![FSST](./logo.webp)
+<img src="./logo.webp" height="100">
 
 # fsst-rs
 
