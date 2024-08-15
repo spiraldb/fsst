@@ -1,5 +1,10 @@
 <img src="./logo.webp" height="400">
 
+![Crates.io Version](https://img.shields.io/crates/v/fsst_rs)
+![docs.rs](https://img.shields.io/docsrs/fsst-rs)
+![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/spiraldb/fsst/ci.yml?branch=develop)
+
+
 # fsst-rs
 
 
