@@ -278,7 +278,6 @@ impl SymbolTable {
         } else if symbol_len >= 3 {
             // Attempt to insert larger symbols into the 3-byte cache
             if !self.lossy_pht.insert(symbol, self.n_symbols) {
-                println!("table insert rejected");
                 return false;
             }
         }

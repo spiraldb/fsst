@@ -51,29 +51,6 @@ fn bench_fsst(c: &mut Criterion) {
 fn bench_lz4(c: &mut Criterion) {
     let mut group = c.benchmark_group("lz4");
 
-    // {
-    //     let compressed = Vec::with_capacity(10_000);
-    //     let mut encoder = lz4::EncoderBuilder::new()
-    //         .block_size(BlockSize::Max64KB)
-    //         .build(compressed)
-    //         .unwrap();
-    //
-    //     encoder.write_all(TEST.as_bytes()).unwrap();
-    //     let (compressed, result) = encoder.finish();
-    //     result.unwrap();
-    //
-    //     let ratio = (TEST.as_bytes().len() as f64) / (compressed.len() as f64);
-    //     println!("LZ4 compress_ratio = {ratio}");
-    //
-    //     // ensure decodes cleanly
-    //     let cursor = Cursor::new(compressed);
-    //     let mut decoder = lz4::Decoder::new(cursor).unwrap();
-    //     let mut output = String::new();
-    //
-    //     decoder.read_to_string(&mut output).unwrap();
-    //     assert_eq!(output.as_str(), TEST);
-    // }
-
     group.bench_function("compress-single", |b| {
         let mut compressed = Vec::with_capacity(100_000_000);
         let mut encoder = lz4::EncoderBuilder::new()

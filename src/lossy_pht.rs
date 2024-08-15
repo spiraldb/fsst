@@ -85,7 +85,7 @@ impl LossyPHT {
         let slot = self.hash(prefix_3bytes) as usize & (HASH_TABLE_SIZE - 1);
         let entry = &mut self.slots[slot];
 
-        if entry.is_unused() {
+        if !entry.is_unused() {
             false
         } else {
             entry.symbol = symbol;

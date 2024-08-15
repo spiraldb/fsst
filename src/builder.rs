@@ -88,7 +88,6 @@ impl SymbolTable {
         let mut pos = self.symbols[prev_code as usize].len();
 
         while pos < len {
-            println!("loop pos = {pos} len = {len}");
             let code = self.find_longest_symbol(&sample[pos..len]);
             counter.record_count1(code);
             counter.record_count2(prev_code, code);
