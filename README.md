@@ -1,6 +1,7 @@
-<img src="./logo.webp" height="100">
+<img src="./logo.webp" height="400">
 
 # fsst-rs
+
 
 A pure-Rust, zero-dependency implementation of the [FSST string compression algorithm][whitepaper].
 
