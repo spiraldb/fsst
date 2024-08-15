@@ -1,4 +1,4 @@
-#![allow(missing_docs)]
+#![allow(missing_docs, clippy::use_debug)]
 
 //! This is a command line program that expects two input files as arguments.
 //!
@@ -44,8 +44,7 @@ fn main() {
 
     let mut chunk_idx = 1;
     let mut pos = 0;
-    let mut chunk = Vec::with_capacity(CHUNK_SIZE);
-    unsafe { chunk.set_len(CHUNK_SIZE) };
+    let mut chunk = vec![0u8; CHUNK_SIZE];
     while pos + CHUNK_SIZE < size_bytes {
         f.read_exact_at(&mut chunk, pos as u64).unwrap();
         // Compress the chunk, don't write it anywhere.
@@ -60,8 +59,7 @@ fn main() {
     // Read last chunk with a new custom-sized buffer.
     if pos < size_bytes {
         let amount = size_bytes - pos;
-        chunk = Vec::with_capacity(size_bytes - pos);
-        unsafe { chunk.set_len(amount) };
+        chunk = vec![0u8; size_bytes - pos];
         f.read_exact_at(&mut chunk, pos as u64).unwrap();
         // Compress the chunk, don't write it anywhere.
         let compact = compressor.compress(&chunk[0..amount]);
