@@ -1,11 +1,11 @@
 use crate::find_longest::FindLongestSymbol;
-use crate::SymbolTable;
+use crate::Compressor;
 
 // Find the code that maps to a symbol with longest-match to a piece of text.
 //
 // This is the naive algorithm that just scans the whole table and is very slow.
 
-impl FindLongestSymbol for SymbolTable {
+impl FindLongestSymbol for Compressor {
     // NOTE(aduffy): if you don't disable inlining, this function won't show up in profiles.
     #[inline(never)]
     fn find_longest_symbol(&self, text: &[u8]) -> u16 {

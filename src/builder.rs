@@ -1,4 +1,4 @@
-//! Functions and types used for building a [`SymbolTable`] from a corpus of text.
+//! Functions and types used for building a [`Compressor`] from a corpus of text.
 //!
 //! This module implements the logic from Algorithm 3 of the [FSST Paper].
 //!
@@ -8,7 +8,7 @@ use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
 use crate::find_longest::FindLongestSymbol;
-use crate::{Symbol, SymbolTable, MAX_CODE};
+use crate::{Compressor, Symbol, MAX_CODE};
 
 #[derive(Debug, Clone)]
 struct Counter {
@@ -53,31 +53,33 @@ impl Counter {
 /// [FSST paper]: https://www.vldb.org/pvldb/vol13/p2649-boncz.pdf
 pub const MAX_GENERATIONS: usize = 5;
 
-/// Build and train a `SymbolTable` from a sample corpus of text.
-///
-/// This function implements the generational algorithm described in the [FSST paper] Section
-/// 4.3. Starting with an empty symbol table, it iteratively compresses the corpus, then attempts
-/// to merge symbols when doing so would yield better compression than leaving them unmerged. The
-/// resulting table will have at most 255 symbols (the 256th symbol is reserved for the escape
-/// code).
-///
-/// [FSST paper]: https://www.vldb.org/pvldb/vol13/p2649-boncz.pdf
-pub fn train(corpus: impl AsRef<[u8]>) -> SymbolTable {
-    let mut table = SymbolTable::default();
-    // TODO(aduffy): handle truncating/sampling if corpus > requires sample size.
-    let sample = corpus.as_ref();
-    if sample.is_empty() {
-        return table;
-    }
-    for _generation in 0..MAX_GENERATIONS {
-        let counter = table.compress_count(sample);
-        table = table.optimize(counter);
-    }
+impl Compressor {
+    /// Build and train a `Compressor` from a sample corpus of text.
+    ///
+    /// This function implements the generational algorithm described in the [FSST paper] Section
+    /// 4.3. Starting with an empty symbol table, it iteratively compresses the corpus, then attempts
+    /// to merge symbols when doing so would yield better compression than leaving them unmerged. The
+    /// resulting table will have at most 255 symbols (the 256th symbol is reserved for the escape
+    /// code).
+    ///
+    /// [FSST paper]: https://www.vldb.org/pvldb/vol13/p2649-boncz.pdf
+    pub fn train(corpus: impl AsRef<[u8]>) -> Self {
+        let mut compressor = Self::default();
+        // TODO(aduffy): handle truncating/sampling if corpus > requires sample size.
+        let sample = corpus.as_ref();
+        if sample.is_empty() {
+            return compressor;
+        }
+        for _generation in 0..MAX_GENERATIONS {
+            let counter = compressor.compress_count(sample);
+            compressor = compressor.optimize(counter);
+        }
 
-    table
+        compressor
+    }
 }
 
-impl SymbolTable {
+impl Compressor {
     /// Compress the text using the current symbol table. Count the code occurrences
     /// and code-pair occurrences to allow us to calculate apparent gain.
     fn compress_count(&self, sample: &[u8]) -> Counter {
@@ -101,7 +103,7 @@ impl SymbolTable {
     /// Using a set of counters and the existing set of symbols, build a new
     /// set of symbols/codes that optimizes the gain over the distribution in `counter`.
     fn optimize(&self, counters: Counter) -> Self {
-        let mut res = SymbolTable::default();
+        let mut res = Compressor::default();
         let mut pqueue = BinaryHeap::new();
         for code1 in 0u16..(256u16 + self.n_symbols as u16) {
             let symbol1 = self.symbols[code1 as usize];
@@ -186,13 +188,13 @@ impl Ord for Candidate {
 
 #[cfg(test)]
 mod test {
-    use crate::{train, ESCAPE_CODE};
+    use crate::{Compressor, ESCAPE_CODE};
 
     #[test]
     fn test_builder() {
-        // Train a SymbolTable on the toy string
+        // Train a Compressor on the toy string
         let text = "hello world";
-        let table = train(text.as_bytes());
+        let table = Compressor::train(text.as_bytes());
 
         // Use the table to compress a string, see the values
         let compressed = table.compress(text.as_bytes());
