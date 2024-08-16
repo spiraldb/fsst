@@ -17,7 +17,7 @@ mod builder;
 mod find_longest;
 mod lossy_pht;
 
-/// `Symbol`s are small (up to 8-byte) segments of strings, stored in a [`SymbolTable`] and
+/// `Symbol`s are small (up to 8-byte) segments of strings, stored in a [`Compressor`][`crate::Compressor`] and
 /// identified by an 8-bit code.
 #[derive(Copy, Clone)]
 pub union Symbol {
@@ -206,29 +206,102 @@ impl Debug for CodeMeta {
     }
 }
 
-/// The static symbol table used for compression and decompression.
+/// Decompressor uses a symbol table to take a stream of 8-bit codes into a string.
+#[derive(Clone)]
+pub struct Decompressor<'a> {
+    /// Table mapping codes to symbols.
+    ///
+    /// The first 256 slots are escapes. The following slots (up to 254)
+    /// are for symbols with actual codes.
+    ///
+    /// This physical layout is important so that we can do straight-line execution in the decompress method.
+    pub(crate) symbols: &'a [Symbol],
+}
+
+impl<'a> Decompressor<'a> {
+    /// Returns a new decompressor that uses the provided symbol table.
+    ///
+    /// # Panics
+    ///
+    /// If the provided symbol table has length greater than [`MAX_CODE`].
+    pub fn new(symbols: &'a [Symbol]) -> Self {
+        assert!(
+            symbols.len() <= MAX_CODE as usize,
+            "symbol table cannot have size exceeding MAX_CODE"
+        );
+
+        Self { symbols }
+    }
+
+    /// Decompress a byte slice that was previously returned by a compressor using
+    /// the same symbol table.
+    pub fn decompress(&self, compressed: &[u8]) -> Vec<u8> {
+        let mut decoded: Vec<u8> = Vec::with_capacity(size_of::<Symbol>() * (compressed.len() + 1));
+        let ptr = decoded.as_mut_ptr();
+
+        let mut in_pos = 0;
+        let mut out_pos = 0;
+
+        while in_pos < compressed.len() && out_pos < (decoded.capacity() - size_of::<Symbol>()) {
+            let code = compressed[in_pos];
+            if code == ESCAPE_CODE {
+                // Advance by one, do raw write.
+                in_pos += 1;
+                // SAFETY: out_pos is always 8 bytes or more from the end of decoded buffer
+                unsafe {
+                    let write_addr = ptr.byte_offset(out_pos as isize);
+                    write_addr.write(compressed[in_pos]);
+                }
+                out_pos += 1;
+                in_pos += 1;
+            } else {
+                let symbol = self.symbols[256 + code as usize];
+                // SAFETY: out_pos is always 8 bytes or more from the end of decoded buffer
+                unsafe {
+                    let write_addr = ptr.byte_offset(out_pos as isize) as *mut u64;
+                    // Perform 8 byte unaligned write.
+                    write_addr.write_unaligned(symbol.num);
+                }
+                in_pos += 1;
+                out_pos += symbol.len();
+            }
+        }
+
+        assert!(
+            in_pos >= compressed.len(),
+            "decompression should exhaust input before output"
+        );
+
+        // SAFETY: we enforce in the loop condition that out_pos <= decoded.capacity()
+        unsafe { decoded.set_len(out_pos) };
+
+        decoded
+    }
+}
+
+/// A compressor that uses a symbol table to greedily compress strings.
 ///
-/// The `SymbolTable` is the central component of FSST. You can create a SymbolTable either by
-/// default, or by [training][`crate::train`] it on an input corpus of text.
+/// The `Compressor` is the central component of FSST. You can create a compressor either by
+/// default (i.e. an empty compressor), or by [training][`Self::train`] it on an input corpus of text.
 ///
 /// Example usage:
 ///
 /// ```
-/// use fsst_rs::{Symbol, SymbolTable};
-/// let mut table = SymbolTable::default();
+/// use fsst::{Symbol, Compressor};
+/// let mut compressor = Compressor::default();
 ///
 /// // Insert a new symbol
-/// assert!(table.insert(Symbol::from_slice(&[b'h', b'e', b'l', b'l', b'o', 0, 0, 0])));
+/// assert!(compressor.insert(Symbol::from_slice(&[b'h', b'e', b'l', b'l', b'o', 0, 0, 0])));
 ///
-/// let compressed = table.compress("hello".as_bytes());
+/// let compressed = compressor.compress("hello".as_bytes());
 /// assert_eq!(compressed, vec![0u8]);
 /// ```
 #[derive(Clone)]
-pub struct SymbolTable {
+pub struct Compressor {
     /// Table mapping codes to symbols.
     pub(crate) symbols: [Symbol; 511],
 
-    /// Indicates the number of entries in the symbol table that have been populated, not counting
+    /// The number of entries in the symbol table that have been populated, not counting
     /// the escape values.
     pub(crate) n_symbols: u8,
 
@@ -242,7 +315,7 @@ pub struct SymbolTable {
     lossy_pht: LossyPHT,
 }
 
-impl Default for SymbolTable {
+impl Default for Compressor {
     fn default() -> Self {
         let mut table = Self {
             symbols: [Symbol::ZERO; 511],
@@ -264,7 +337,7 @@ impl Default for SymbolTable {
 ///
 /// The symbol table is trained on a corpus of data in the form of a single byte array, building up
 /// a mapping of 1-byte "codes" to sequences of up to `N` plaintext bytse, or "symbols".
-impl SymbolTable {
+impl Compressor {
     /// Attempt to insert a new symbol at the end of the table.
     ///
     /// # Panics
@@ -434,48 +507,17 @@ impl SymbolTable {
         values
     }
 
-    /// Decompress a byte slice that was previously returned by [compression][Self::compress].
-    pub fn decompress(&self, compressed: &[u8]) -> Vec<u8> {
-        let mut decoded: Vec<u8> = Vec::with_capacity(size_of::<Symbol>() * (compressed.len() + 1));
-        let ptr = decoded.as_mut_ptr();
+    /// Access the decompressor that can be used to decompress strings emitted from this
+    /// `Compressor` instance.
+    pub fn decompressor(&self) -> Decompressor {
+        Decompressor::new(self.symbol_table())
+    }
 
-        let mut in_pos = 0;
-        let mut out_pos = 0;
-
-        while in_pos < compressed.len() && out_pos < (decoded.capacity() - size_of::<Symbol>()) {
-            let code = compressed[in_pos];
-            if code == ESCAPE_CODE {
-                // Advance by one, do raw write.
-                in_pos += 1;
-                // SAFETY: out_pos is always 8 bytes or more from the end of decoded buffer
-                unsafe {
-                    let write_addr = ptr.byte_offset(out_pos as isize);
-                    write_addr.write(compressed[in_pos]);
-                }
-                out_pos += 1;
-                in_pos += 1;
-            } else {
-                let symbol = self.symbols[256 + code as usize];
-                // SAFETY: out_pos is always 8 bytes or more from the end of decoded buffer
-                unsafe {
-                    let write_addr = ptr.byte_offset(out_pos as isize) as *mut u64;
-                    // Perform 8 byte unaligned write.
-                    write_addr.write_unaligned(symbol.num);
-                }
-                in_pos += 1;
-                out_pos += symbol.len();
-            }
-        }
-
-        assert!(
-            in_pos >= compressed.len(),
-            "decompression should exhaust input before output"
-        );
-
-        // SAFETY: we enforce in the loop condition that out_pos <= decoded.capacity()
-        unsafe { decoded.set_len(out_pos) };
-
-        decoded
+    /// Returns a readonly slice of the current symbol table.
+    ///
+    /// The returned slice will have length of `256 + n_symbols`.
+    pub fn symbol_table(&self) -> &[Symbol] {
+        &self.symbols[0..(256 + self.n_symbols as usize)]
     }
 }
 

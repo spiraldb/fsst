@@ -19,6 +19,8 @@ use std::{
     path::Path,
 };
 
+use fsst::Compressor;
+
 fn main() {
     let args: Vec<_> = std::env::args().skip(1).collect();
     assert!(args.len() >= 2, "args TRAINING and FILE must be provided");
@@ -33,7 +35,7 @@ fn main() {
     }
 
     println!("building the compressor from {train_path:?}...");
-    let compressor = fsst_rs::train(&train_bytes);
+    let compressor = Compressor::train(&train_bytes);
 
     println!("compressing blocks of {input_path:?} with compressor...");
 
