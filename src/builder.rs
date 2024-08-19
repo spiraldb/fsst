@@ -7,8 +7,7 @@
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
-use crate::find_longest::FindLongestSymbol;
-use crate::{Compressor, Symbol, MAX_CODE};
+use crate::{Compressor, Symbol, ESCAPE_CODE, MAX_CODE};
 
 #[derive(Debug, Clone)]
 struct Counter {
@@ -24,6 +23,16 @@ impl Counter {
         Self {
             counts1: vec![0; MAX_CODE as usize],
             counts2: vec![vec![0; MAX_CODE as usize]; MAX_CODE as usize],
+        }
+    }
+
+    fn reset(&mut self) {
+        for code1 in 0..MAX_CODE {
+            self.counts1[code1 as usize] = 0;
+
+            for code2 in 0..MAX_CODE {
+                self.counts2[code1 as usize][code2 as usize] = 0;
+            }
         }
     }
 
@@ -51,7 +60,11 @@ impl Counter {
 /// The number of generations used for training. This is taken from the [FSST paper].
 ///
 /// [FSST paper]: https://www.vldb.org/pvldb/vol13/p2649-boncz.pdf
-pub const MAX_GENERATIONS: usize = 5;
+#[cfg(not(miri))]
+const MAX_GENERATIONS: usize = 5;
+
+#[cfg(miri)]
+const MAX_GENERATIONS: usize = 1;
 
 impl Compressor {
     /// Build and train a `Compressor` from a sample corpus of text.
@@ -70,69 +83,121 @@ impl Compressor {
         if sample.is_empty() {
             return compressor;
         }
-        for _generation in 0..MAX_GENERATIONS {
-            let counter = compressor.compress_count(sample);
-            compressor = compressor.optimize(counter);
+
+        let mut counter = Counter::new();
+
+        for _generation in 0..(MAX_GENERATIONS - 1) {
+            compressor.compress_count(sample, &mut counter);
+            compressor = compressor.optimize(&counter, true);
+            counter.reset();
         }
 
-        compressor
+        compressor.compress_count(sample, &mut counter);
+        compressor.optimize(&counter, true)
+    }
+
+    /// Specify the number of generations to train for
+    pub fn train_n(corpus: impl AsRef<[u8]>, generations: usize) -> Self {
+        let mut compressor = Self::default();
+        // TODO(aduffy): handle truncating/sampling if corpus > requires sample size.
+        let sample = corpus.as_ref();
+        if sample.is_empty() {
+            return compressor;
+        }
+
+        let mut counter = Counter::new();
+
+        for _generation in 0..(generations - 1) {
+            compressor.compress_count(sample, &mut counter);
+            compressor = compressor.optimize(&counter, false);
+        }
+
+        compressor.compress_count(sample, &mut counter);
+        compressor.optimize(&counter, true)
     }
 }
 
 impl Compressor {
     /// Compress the text using the current symbol table. Count the code occurrences
     /// and code-pair occurrences to allow us to calculate apparent gain.
-    fn compress_count(&self, sample: &[u8]) -> Counter {
-        let mut counter = Counter::new();
-        let len = sample.len();
-        let mut prev_code = self.find_longest_symbol(sample);
-        counter.record_count1(prev_code);
-        let mut pos = self.symbols[prev_code as usize].len();
+    fn compress_count(&self, sample: &[u8], counter: &mut Counter) {
+        let compressed = self.compress(sample);
+        let len = compressed.len();
 
-        while pos < len {
-            let code = self.find_longest_symbol(&sample[pos..len]);
-            counter.record_count1(code);
-            counter.record_count2(prev_code, code);
-            pos += self.symbols[code as usize].len();
-            prev_code = code;
+        if len == 0 {
+            return;
         }
 
-        counter
+        #[inline(never)]
+        fn next_code(pos: usize, compressed: &[u8]) -> (u16, usize) {
+            if compressed[pos] == ESCAPE_CODE {
+                (compressed[pos + 1] as u16, 2)
+            } else {
+                (256 + compressed[pos] as u16, 1)
+            }
+        }
+
+        // Get first code, record count
+        let (code, pos) = next_code(0, &compressed);
+        counter.record_count1(code);
+
+        let mut pos = pos;
+        let mut prev_code = code;
+
+        while pos < len {
+            let (code, advance) = next_code(pos, &compressed);
+            pos += advance;
+
+            counter.record_count1(code);
+            counter.record_count2(prev_code, code);
+
+            prev_code = code;
+        }
     }
 
     /// Using a set of counters and the existing set of symbols, build a new
     /// set of symbols/codes that optimizes the gain over the distribution in `counter`.
-    fn optimize(&self, counters: Counter) -> Self {
+    fn optimize(&self, counters: &Counter, include_ascii: bool) -> Self {
         let mut res = Compressor::default();
-        let mut pqueue = BinaryHeap::new();
+        let mut pqueue = BinaryHeap::with_capacity(65_536);
         for code1 in 0u16..(256u16 + self.n_symbols as u16) {
             let symbol1 = self.symbols[code1 as usize];
-            let gain = counters.count1(code1) * symbol1.len();
-            pqueue.push(Candidate {
-                symbol: symbol1,
-                gain,
-            });
+            let mut gain = counters.count1(code1) * symbol1.len();
+            // NOTE: use heuristic from C++ implementation to boost the gain of single-byte symbols.
+            // This helps to reduce exception counts.
+            if code1 < 256 {
+                gain = 8 * gain;
+            }
+            if gain > 0 {
+                // println!("pushing single: symbol = {symbol1:?} gain = {gain}");
+                pqueue.push(Candidate {
+                    symbol: symbol1,
+                    gain,
+                });
+            }
 
             for code2 in 0u16..(256u16 + self.n_symbols as u16) {
                 let symbol2 = &self.symbols[code2 as usize];
                 // If either symbol is zero-length, or if merging would yield a symbol of
                 // length greater than 8, skip.
-                if symbol1.len() + symbol2.len() >= 8 {
+                if symbol1.len() + symbol2.len() > 8 {
                     continue;
                 }
                 let new_symbol = symbol1.concat(symbol2);
-                // as`sert the symbol is not empty
-                assert!(
-                    !new_symbol.is_empty(),
-                    "symbol made by merging {:?} and {:?} is empty",
-                    symbol1,
-                    symbol2,
-                );
-                let gain = counters.count2(code1, code2);
-                pqueue.push(Candidate {
-                    symbol: new_symbol,
-                    gain,
-                })
+                let gain = counters.count2(code1, code2) * new_symbol.len();
+                if gain > 0 {
+                    // println!("pushing double: symbol = {new_symbol:?} gain = {gain}");
+                    // println!(
+                    //     "\tfirst-half gain = {} second-half gain = {}",
+                    //     counters.count1(code1),
+                    //     counters.count1(code2)
+                    // );
+
+                    pqueue.push(Candidate {
+                        symbol: new_symbol,
+                        gain,
+                    })
+                }
             }
         }
 
@@ -142,6 +207,25 @@ impl Compressor {
             let candidate = pqueue.pop().unwrap();
             if res.insert(candidate.symbol) {
                 n_symbols += 1;
+            }
+        }
+
+        // If there are leftover slots, fill them with ASCII chars.
+        // This helps reduce the number of escapes.
+        //
+        // Note that because of the lossy hash table, we won't accidentally
+        // save the same ASCII character twice into the table.
+        if include_ascii {
+            for character in
+                " abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ[](){}:?/<>".bytes()
+            {
+                if n_symbols == 255 {
+                    break;
+                }
+
+                if res.insert(Symbol::from_u8(character)) {
+                    n_symbols += 1
+                }
             }
         }
 
@@ -189,6 +273,12 @@ impl Ord for Candidate {
 #[cfg(test)]
 mod test {
     use crate::{Compressor, ESCAPE_CODE};
+
+    #[test]
+    fn test_sadness() {
+        let compressor = Compressor::train_n("hello world", 1);
+        let _ = compressor.compress(&[1]);
+    }
 
     #[test]
     fn test_builder() {

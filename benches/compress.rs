@@ -37,6 +37,15 @@ fn bench_fsst(c: &mut Criterion) {
     println!("DECODED: {}", decompressed);
     assert_eq!(decompressed, TEST);
 
+    let mut out = vec![0u8; 8];
+    let out_ptr = out.as_mut_ptr();
+    let chars = &plaintext[0..8];
+    let word = u64::from_le_bytes(chars.try_into().unwrap());
+
+    group.bench_function("compress-word", |b| {
+        b.iter(|| black_box(unsafe { compressor.compress_word(word, out_ptr) }));
+    });
+
     group.bench_function("compress-single", |b| {
         b.iter(|| black_box(compressor.compress(black_box(plaintext))));
     });

@@ -95,11 +95,13 @@ impl LossyPHT {
         }
     }
 
+    #[inline]
     pub(crate) fn lookup(&self, word: u64) -> TableEntry {
         let prefix_3bytes = word & 0xFF_FF_FF;
         let slot = self.hash(prefix_3bytes) as usize & (HASH_TABLE_SIZE - 1);
 
-        self.slots[slot]
+        // SAFETY: the slot is guaranteed to between 0...(HASH_TABLE_SIZE - 1).
+        unsafe { *self.slots.get_unchecked(slot) }
     }
 
     /// Hash a value to find the bucket it belongs in.
