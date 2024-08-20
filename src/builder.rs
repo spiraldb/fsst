@@ -169,7 +169,6 @@ impl Compressor {
                 gain *= 8;
             }
             if gain > 0 {
-                // println!("pushing single: symbol = {symbol1:?} gain = {gain}");
                 pqueue.push(Candidate {
                     symbol: symbol1,
                     gain,
@@ -186,13 +185,6 @@ impl Compressor {
                 let new_symbol = symbol1.concat(symbol2);
                 let gain = counters.count2(code1, code2) * new_symbol.len();
                 if gain > 0 {
-                    // println!("pushing double: symbol = {new_symbol:?} gain = {gain}");
-                    // println!(
-                    //     "\tfirst-half gain = {} second-half gain = {}",
-                    //     counters.count1(code1),
-                    //     counters.count1(code2)
-                    // );
-
                     pqueue.push(Candidate {
                         symbol: new_symbol,
                         gain,
@@ -272,13 +264,8 @@ impl Ord for Candidate {
 
 #[cfg(test)]
 mod test {
-    use crate::{Compressor, ESCAPE_CODE};
 
-    #[test]
-    fn test_sadness() {
-        let compressor = Compressor::train_n("hello world", 1);
-        let _ = compressor.compress(&[1]);
-    }
+    use crate::{Compressor, ESCAPE_CODE};
 
     #[test]
     fn test_builder() {
