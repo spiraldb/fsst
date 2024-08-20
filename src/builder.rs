@@ -20,10 +20,7 @@ assert_sizeof!(CodesBitmap => 64);
 impl CodesBitmap {
     /// Set the indicated bit. Must be between 0 and [`MAX_CODE`][crate::MAX_CODE].
     pub(crate) fn set(&mut self, index: usize) {
-        debug_assert!(
-            index <= MAX_CODE as usize,
-            "CodesBitmap only works on codes <= {MAX_CODE}"
-        );
+        debug_assert!(index <= MAX_CODE as usize, "code cannot exceed {MAX_CODE}");
 
         let map = index >> 6;
         self.codes[map] |= 1 << (index % 64);
@@ -69,8 +66,8 @@ impl<'a> Iterator for CodesIterator<'a> {
         let position = self.block.trailing_zeros() as usize;
         let code = self.reference + position;
 
-        // Reference is advanced by the set position in the bit iterator.
-        self.reference += position;
+        // The next iteration will calculate with reference to the returned code + 1
+        self.reference = code + 1;
         self.block = if position == 63 {
             0
         } else {
@@ -383,5 +380,30 @@ mod test {
         // empty case
         let map = CodesBitmap::default();
         assert_eq!(map.codes().collect::<Vec<_>>(), vec![]);
+
+        // edge case: first bit in each block is set
+        let mut map = CodesBitmap::default();
+        (0..8).for_each(|i| map.set(64 * i));
+        assert_eq!(
+            map.codes().collect::<Vec<_>>(),
+            (0u16..8).map(|i| 64 * i).collect::<Vec<_>>(),
+        );
+
+        // Full bitmap case. There are only 512 values, so test them all
+        let mut map = CodesBitmap::default();
+        for i in 0..512 {
+            map.set(i);
+        }
+        assert_eq!(
+            map.codes().collect::<Vec<_>>(),
+            (0u16..512u16).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "code cannot exceed")]
+    fn test_bitmap_invalid() {
+        let mut map = CodesBitmap::default();
+        map.set(512);
     }
 }
