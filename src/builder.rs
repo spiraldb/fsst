@@ -11,14 +11,12 @@ use crate::{Compressor, Symbol, ESCAPE_CODE, MAX_CODE};
 
 /// Bitmap that only works for values up to 512
 #[derive(Clone, Copy, Debug, Default)]
-#[allow(dead_code)]
 struct CodesBitmap {
     codes: [u64; 8],
 }
 
 assert_sizeof!(CodesBitmap => 64);
 
-#[allow(dead_code)]
 impl CodesBitmap {
     /// Set the indicated bit. Must be between 0 and [`MAX_CODE`][crate::MAX_CODE].
     pub(crate) fn set(&mut self, index: usize) {
@@ -94,7 +92,7 @@ struct Counter {
     /// Bitmap index of pairs that have been set.
     ///
     /// `pair_index[code1].codes()` yields an iterator that can
-    /// be used to find the values of codes in the outside iterator.
+    /// be used to find all possible codes that follow `codes1`.
     pair_index: Vec<CodesBitmap>,
 }
 
@@ -135,7 +133,11 @@ impl Counter {
         self.counts2[idx]
     }
 
-    /// Access to the second-code in a code pair following `code1`.
+    /// Returns an iterator over the codes that have been observed
+    /// to follow `code1`.
+    ///
+    /// This is the set of all values `code2` where there was
+    /// previously a call to `self.record_count2(code1, code2)`.
     fn second_codes(&self, code1: u16) -> CodesIterator {
         self.pair_index[code1 as usize].codes()
     }
