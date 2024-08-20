@@ -15,24 +15,29 @@ struct Counter {
     counts1: Vec<usize>,
 
     /// Frequency count for each code-pair.
-    counts2: Vec<Vec<usize>>,
+    counts2: Vec<usize>,
 }
+
+const COUNTS1_SIZE: usize = MAX_CODE as usize;
+// NOTE: in Rust, creating a 1D vector of length N^2 is ~4x faster than creating a 2-D vector,
+//  because `vec!` has a specialization for zero.
+const COUNTS2_SIZE: usize = COUNTS1_SIZE * COUNTS1_SIZE;
 
 impl Counter {
     fn new() -> Self {
         Self {
-            counts1: vec![0; MAX_CODE as usize],
-            counts2: vec![vec![0; MAX_CODE as usize]; MAX_CODE as usize],
+            counts1: vec![0; COUNTS1_SIZE],
+            counts2: vec![0; COUNTS2_SIZE],
         }
     }
 
-    fn reset(&mut self) {
-        for code1 in 0..MAX_CODE {
-            self.counts1[code1 as usize] = 0;
-
-            for code2 in 0..MAX_CODE {
-                self.counts2[code1 as usize][code2 as usize] = 0;
-            }
+    /// reset
+    pub fn reset(&mut self) {
+        for idx in 0..COUNTS1_SIZE {
+            self.counts1[idx] = 0;
+        }
+        for idx in 0..COUNTS2_SIZE {
+            self.counts2[idx] = 0;
         }
     }
 
@@ -43,7 +48,8 @@ impl Counter {
 
     #[inline]
     fn record_count2(&mut self, code1: u16, code2: u16) {
-        self.counts2[code1 as usize][code2 as usize] += 1;
+        let idx = (code1 as usize) * 511 + (code2 as usize);
+        self.counts2[idx] += 1;
     }
 
     #[inline]
@@ -53,7 +59,8 @@ impl Counter {
 
     #[inline]
     fn count2(&self, code1: u16, code2: u16) -> usize {
-        self.counts2[code1 as usize][code2 as usize]
+        let idx = (code1 as usize) * 511 + (code2 as usize);
+        self.counts2[idx]
     }
 }
 
@@ -86,26 +93,6 @@ impl Compressor {
             compressor.compress_count(sample, &mut counter);
             compressor = compressor.optimize(&counter, true);
             counter.reset();
-        }
-
-        compressor.compress_count(sample, &mut counter);
-        compressor.optimize(&counter, true)
-    }
-
-    /// Specify the number of generations to train for
-    pub fn train_n(corpus: impl AsRef<[u8]>, generations: usize) -> Self {
-        let mut compressor = Self::default();
-        // TODO(aduffy): handle truncating/sampling if corpus > requires sample size.
-        let sample = corpus.as_ref();
-        if sample.is_empty() {
-            return compressor;
-        }
-
-        let mut counter = Counter::new();
-
-        for _generation in 0..(generations - 1) {
-            compressor.compress_count(sample, &mut counter);
-            compressor = compressor.optimize(&counter, false);
         }
 
         compressor.compress_count(sample, &mut counter);
@@ -224,6 +211,7 @@ impl Compressor {
 /// A candidate for inclusion in a symbol table.
 ///
 /// This is really only useful for the `optimize` step of training.
+#[derive(Copy, Clone, Debug)]
 struct Candidate {
     gain: usize,
     symbol: Symbol,

@@ -60,15 +60,12 @@ pub(crate) struct LossyPHT {
 impl LossyPHT {
     /// Construct a new empty lossy perfect hash table
     pub(crate) fn new() -> Self {
-        let mut slots = Vec::with_capacity(HASH_TABLE_SIZE);
-        // Initialize all slots to empty entries
-        for _ in 0..HASH_TABLE_SIZE {
-            slots.push(TableEntry {
-                symbol: Symbol::ZERO,
-                code: CodeMeta::EMPTY,
-                ignored_bits: 64,
-            });
-        }
+        let slots = [TableEntry {
+            symbol: Symbol::ZERO,
+            code: CodeMeta::EMPTY,
+            ignored_bits: 64,
+        }]
+        .repeat(HASH_TABLE_SIZE);
 
         Self { slots }
     }

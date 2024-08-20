@@ -41,9 +41,7 @@ impl Symbol {
 
     /// Create a new single-byte symbol
     pub fn from_u8(value: u8) -> Self {
-        Self {
-            bytes: [value, 0, 0, 0, 0, 0, 0, 0],
-        }
+        Self { num: value as u64 }
     }
 }
 
@@ -334,10 +332,13 @@ pub struct Compressor {
 
 impl Default for Compressor {
     fn default() -> Self {
+        let symbols = vec![0u64; 511];
+        // SAFETY: transmute safety assured by the compiler.
+        let symbols: Vec<Symbol> = unsafe { std::mem::transmute(symbols) };
         let mut table = Self {
-            symbols: vec![Symbol::ZERO; 511],
+            symbols,
             n_symbols: 0,
-            codes_twobyte: vec![CodeMeta::EMPTY; 65_536],
+            codes_twobyte: [CodeMeta::EMPTY].repeat(65_536),
             lossy_pht: LossyPHT::new(),
         };
 
