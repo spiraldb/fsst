@@ -47,16 +47,13 @@ fn test_one_byte() {
 
 #[test]
 fn test_zeros() {
-    println!("training zeros");
     let training_data: Vec<u8> = vec![0, 1, 2, 3, 4, 0];
     let trained = Compressor::train(&training_data);
-    println!("compressing with zeros");
     let compressed = trained.compress(&[4, 0]);
-    println!("decomperssing with zeros");
     assert_eq!(trained.decompressor().decompress(&compressed), &[4, 0]);
-    println!("done");
 }
 
+#[cfg_attr(miri, ignore)]
 #[test]
 fn test_large() {
     let corpus: Vec<u8> = DECLARATION.bytes().cycle().take(10_240).collect();
