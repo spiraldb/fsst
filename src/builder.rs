@@ -111,7 +111,6 @@ impl Compressor {
             return;
         }
 
-        #[inline(never)]
         fn next_code(pos: usize, compressed: &[u8]) -> (u16, usize) {
             if compressed[pos] == ESCAPE_CODE {
                 (compressed[pos + 1] as u16, 2)

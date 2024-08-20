@@ -1,8 +1,4 @@
-//! Compression benchmark.
-//!
-//! Contains benchmarks for FSST compression, decompression, and symbol table training.
-//!
-//! Also contains LZ4 baseline.
+//! Benchmarks for FSST compression, decompression, and symbol table training.
 #![allow(missing_docs)]
 use core::str;
 
