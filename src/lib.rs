@@ -45,13 +45,6 @@ impl Symbol {
             bytes: [value, 0, 0, 0, 0, 0, 0, 0],
         }
     }
-
-    /// Create a new single-byte symbol containing the given char
-    pub fn from_char(value: char) -> Self {
-        Self {
-            bytes: [value as u8, 0, 0, 0, 0, 0, 0, 0],
-        }
-    }
 }
 
 impl Symbol {
@@ -134,10 +127,10 @@ mod test {
 
     #[test]
     fn test_concat() {
-        let symbola = Symbol::from_char('a');
-        let symbolb = Symbol::from_char('b');
+        let symbola = Symbol::from_u8(b'a');
+        let symbolb = Symbol::from_u8(b'b');
         let symbolab = symbola.concat(&symbolb);
-        assert_eq!(symbolab.as_slice(), &['a' as u8, 'b' as u8]);
+        assert_eq!(symbolab.as_slice(), b"ab");
     }
 }
 

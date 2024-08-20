@@ -6,7 +6,7 @@
 #![allow(missing_docs)]
 use core::str;
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
 
 use fsst::{Compressor, ESCAPE_CODE};
 
@@ -34,7 +34,6 @@ fn bench_fsst(c: &mut Criterion) {
     let decompressor = compressor.decompressor();
     let decompressed = decompressor.decompress(&compressed);
     let decompressed = str::from_utf8(&decompressed).unwrap();
-    println!("DECODED: {}", decompressed);
     assert_eq!(decompressed, TEST);
 
     let mut out = vec![0u8; 8];
@@ -42,14 +41,17 @@ fn bench_fsst(c: &mut Criterion) {
     let chars = &plaintext[0..8];
     let word = u64::from_le_bytes(chars.try_into().unwrap());
 
+    group.throughput(Throughput::Elements(1));
     group.bench_function("compress-word", |b| {
         b.iter(|| black_box(unsafe { compressor.compress_word(word, out_ptr) }));
     });
 
+    group.throughput(Throughput::Bytes(CORPUS.len() as u64));
     group.bench_function("compress-single", |b| {
-        b.iter(|| black_box(compressor.compress(black_box(plaintext))));
+        b.iter(|| black_box(compressor.compress(black_box(CORPUS.as_bytes()))));
     });
 
+    group.throughput(Throughput::Bytes(decompressed.len() as u64));
     group.bench_function("decompress-single", |b| {
         b.iter(|| black_box(decompressor.decompress(black_box(&compressed))));
     });

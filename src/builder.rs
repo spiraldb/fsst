@@ -166,7 +166,7 @@ impl Compressor {
             // NOTE: use heuristic from C++ implementation to boost the gain of single-byte symbols.
             // This helps to reduce exception counts.
             if code1 < 256 {
-                gain = 8 * gain;
+                gain *= 8;
             }
             if gain > 0 {
                 // println!("pushing single: symbol = {symbol1:?} gain = {gain}");
