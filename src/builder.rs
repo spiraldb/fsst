@@ -146,7 +146,10 @@ impl Counter {
 /// The number of generations used for training. This is taken from the [FSST paper].
 ///
 /// [FSST paper]: https://www.vldb.org/pvldb/vol13/p2649-boncz.pdf
+#[cfg(not(miri))]
 const MAX_GENERATIONS: usize = 5;
+#[cfg(miri)]
+const MAX_GENERATIONS: usize = 2;
 
 impl Compressor {
     /// Build and train a `Compressor` from a sample corpus of text.
