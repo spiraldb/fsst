@@ -74,7 +74,7 @@ jobs:
         if: steps.rustup-cache.outputs.cache-hit != 'true'
         with:
           toolchain: "${{ steps.rust-version.outputs.version }}"
-          components: clippy, rustfmt
+          components: miri
       - name: Rust Dependency Cache
         uses: Swatinem/rust-cache@v2
         with:
