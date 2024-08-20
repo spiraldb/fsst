@@ -9,6 +9,80 @@ use std::collections::BinaryHeap;
 
 use crate::{Compressor, Symbol, ESCAPE_CODE, MAX_CODE};
 
+/// Bitmap that only works for values up to 512
+#[derive(Clone, Copy, Debug, Default)]
+#[allow(dead_code)]
+struct CodesBitmap {
+    codes: [u64; 8],
+}
+
+assert_sizeof!(CodesBitmap => 64);
+
+#[allow(dead_code)]
+impl CodesBitmap {
+    /// Set the indicated bit. Must be between 0 and [`MAX_CODE`][crate::MAX_CODE].
+    pub(crate) fn set(&mut self, index: usize) {
+        debug_assert!(
+            index <= MAX_CODE as usize,
+            "CodesBitmap only works on codes <= {MAX_CODE}"
+        );
+
+        let map = index >> 6;
+        self.codes[map] |= 1 << (index % 64);
+    }
+
+    /// Get all codes set in this bitmap
+    pub(crate) fn codes(&self) -> CodesIterator {
+        CodesIterator {
+            inner: self,
+            index: 0,
+            block: self.codes[0],
+            reference: 0,
+        }
+    }
+}
+
+struct CodesIterator<'a> {
+    inner: &'a CodesBitmap,
+    index: usize,
+    block: u64,
+    reference: usize,
+}
+
+impl<'a> Iterator for CodesIterator<'a> {
+    type Item = u16;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        // If current is zero, advance to next non-zero block
+        while self.block == 0 {
+            self.index += 1;
+            if self.index >= 8 {
+                return None;
+            }
+            self.block = self.inner.codes[self.index];
+            self.reference = self.index * 64;
+        }
+
+        if self.block == 0 {
+            return None;
+        }
+
+        // Find the next set bit in the current block.
+        let position = self.block.trailing_zeros() as usize;
+        let code = self.reference + position;
+
+        // Reference is advanced by the set position in the bit iterator.
+        self.reference += position;
+        self.block = if position == 63 {
+            0
+        } else {
+            self.block >> (1 + position)
+        };
+
+        Some(code as u16)
+    }
+}
+
 #[derive(Debug, Clone)]
 struct Counter {
     /// Frequency count for each code.
@@ -16,6 +90,12 @@ struct Counter {
 
     /// Frequency count for each code-pair.
     counts2: Vec<usize>,
+
+    /// Bitmap index of pairs that have been set.
+    ///
+    /// `pair_index[code1].codes()` yields an iterator that can
+    /// be used to find the values of codes in the outside iterator.
+    pair_index: Vec<CodesBitmap>,
 }
 
 const COUNTS1_SIZE: usize = MAX_CODE as usize;
@@ -28,16 +108,7 @@ impl Counter {
         Self {
             counts1: vec![0; COUNTS1_SIZE],
             counts2: vec![0; COUNTS2_SIZE],
-        }
-    }
-
-    /// reset
-    pub fn reset(&mut self) {
-        for idx in 0..COUNTS1_SIZE {
-            self.counts1[idx] = 0;
-        }
-        for idx in 0..COUNTS2_SIZE {
-            self.counts2[idx] = 0;
+            pair_index: vec![CodesBitmap::default(); COUNTS1_SIZE],
         }
     }
 
@@ -50,6 +121,7 @@ impl Counter {
     fn record_count2(&mut self, code1: u16, code2: u16) {
         let idx = (code1 as usize) * 511 + (code2 as usize);
         self.counts2[idx] += 1;
+        self.pair_index[code1 as usize].set(code2 as usize);
     }
 
     #[inline]
@@ -61,6 +133,11 @@ impl Counter {
     fn count2(&self, code1: u16, code2: u16) -> usize {
         let idx = (code1 as usize) * 511 + (code2 as usize);
         self.counts2[idx]
+    }
+
+    /// Access to the second-code in a code pair following `code1`.
+    fn second_codes(&self, code1: u16) -> CodesIterator {
+        self.pair_index[code1 as usize].codes()
     }
 }
 
@@ -87,14 +164,13 @@ impl Compressor {
             return compressor;
         }
 
-        let mut counter = Counter::new();
-
         for _generation in 0..(MAX_GENERATIONS - 1) {
+            let mut counter = Counter::new();
             compressor.compress_count(sample, &mut counter);
             compressor = compressor.optimize(&counter, true);
-            counter.reset();
         }
 
+        let mut counter = Counter::new();
         compressor.compress_count(sample, &mut counter);
         compressor.optimize(&counter, true)
     }
@@ -142,9 +218,16 @@ impl Compressor {
     fn optimize(&self, counters: &Counter, include_ascii: bool) -> Self {
         let mut res = Compressor::default();
         let mut pqueue = BinaryHeap::with_capacity(65_536);
+
         for code1 in 0u16..(256u16 + self.n_symbols as u16) {
             let symbol1 = self.symbols[code1 as usize];
-            let mut gain = counters.count1(code1) * symbol1.len();
+            let count = counters.count1(code1);
+            // If count is zero, we can skip the whole inner loop.
+            if count == 0 {
+                continue;
+            }
+
+            let mut gain = count * symbol1.len();
             // NOTE: use heuristic from C++ implementation to boost the gain of single-byte symbols.
             // This helps to reduce exception counts.
             if code1 < 256 {
@@ -157,10 +240,10 @@ impl Compressor {
                 });
             }
 
-            for code2 in 0u16..(256u16 + self.n_symbols as u16) {
+            for code2 in counters.second_codes(code1) {
                 let symbol2 = &self.symbols[code2 as usize];
-                // If either symbol is zero-length, or if merging would yield a symbol of
-                // length greater than 8, skip.
+
+                // If merging would yield a symbol of length greater than 8, skip.
                 if symbol1.len() + symbol2.len() > 8 {
                     continue;
                 }
@@ -247,8 +330,7 @@ impl Ord for Candidate {
 
 #[cfg(test)]
 mod test {
-
-    use crate::{Compressor, ESCAPE_CODE};
+    use crate::{builder::CodesBitmap, Compressor, ESCAPE_CODE};
 
     #[test]
     fn test_builder() {
@@ -281,5 +363,20 @@ mod test {
                 b'3',
             ]
         );
+    }
+
+    #[test]
+    fn test_bitmap() {
+        let mut map = CodesBitmap::default();
+        map.set(10);
+        map.set(100);
+        map.set(500);
+
+        let codes: Vec<u16> = map.codes().collect();
+        assert_eq!(codes, vec![10u16, 100, 500]);
+
+        // empty case
+        let map = CodesBitmap::default();
+        assert_eq!(map.codes().collect::<Vec<_>>(), vec![]);
     }
 }
