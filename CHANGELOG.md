@@ -6,6 +6,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0](https://github.com/spiraldb/fsst/compare/v0.1.0...v0.2.0) - 2024-08-20
+
+### Other
+- tput improvements ([#13](https://github.com/spiraldb/fsst/pull/13))
+
 ## [0.1.0](https://github.com/spiraldb/fsst/compare/v0.0.1...v0.1.0) - 2024-08-16
 
 ### Added
