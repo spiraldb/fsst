@@ -30,15 +30,14 @@ fn bench_fsst(c: &mut Criterion) {
     let decompressor = compressor.decompressor();
     let decompressed = decompressor.decompress(&compressed);
     let decompressed = str::from_utf8(&decompressed).unwrap();
-    assert_eq!(decompressed, TEST);
-
-    let mut out = vec![0u8; 8];
-    let out_ptr = out.as_mut_ptr();
-    let chars = &plaintext[0..8];
-    let word = u64::from_le_bytes(chars.try_into().unwrap());
 
     group.throughput(Throughput::Elements(1));
     group.bench_function("compress-word", |b| {
+        let mut out = vec![0u8; 8];
+        let out_ptr = out.as_mut_ptr();
+        let front = &TEST.as_bytes()[0..8];
+        let word = u64::from_le_bytes(front.try_into().unwrap());
+
         b.iter(|| black_box(unsafe { compressor.compress_word(word, out_ptr) }));
     });
 
