@@ -332,13 +332,16 @@ pub struct Compressor {
 
 impl Default for Compressor {
     fn default() -> Self {
+        // NOTE: `vec!` has a specialization for building a new vector of `0u64`. Because Symbol and u64
+        //  have the same bit pattern, we can allocate as u64 and transmute. If we do `vec![Symbol::EMPTY; N]`,
+        // that will create a new Vec and call `Symbol::EMPTY.clone()` `N` times which is considerably slower.
         let symbols = vec![0u64; 511];
         // SAFETY: transmute safety assured by the compiler.
         let symbols: Vec<Symbol> = unsafe { std::mem::transmute(symbols) };
         let mut table = Self {
             symbols,
             n_symbols: 0,
-            codes_twobyte: [CodeMeta::EMPTY].repeat(65_536),
+            codes_twobyte: vec![CodeMeta::EMPTY; 65_536],
             lossy_pht: LossyPHT::new(),
         };
 
