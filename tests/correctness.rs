@@ -59,22 +59,17 @@ fn test_zeros() {
 
 #[test]
 fn test_large() {
-    let mut corpus = String::new();
-    // TODO(aduffy): make this larger once table build performance is better.
-    while corpus.len() < 10 * 1_024 {
-        corpus.push_str(DECLARATION);
-    }
+    let corpus: Vec<u8> = DECLARATION.bytes().cycle().take(10_240).collect();
 
     let trained = Compressor::train(&corpus);
-    let mut massive = String::new();
-    while massive.len() < 16 * 1_024 * 1_024 {
-        massive.push_str(DECLARATION);
-    }
-    let compressed = trained.compress(massive.as_bytes());
-    assert_eq!(
-        trained.decompressor().decompress(&compressed),
-        massive.as_bytes()
-    );
+    let massive: Vec<u8> = DECLARATION
+        .bytes()
+        .cycle()
+        .take(16 * 1_024 * 1_024)
+        .collect();
+
+    let compressed = trained.compress(&massive);
+    assert_eq!(trained.decompressor().decompress(&compressed), massive);
 }
 
 #[test]

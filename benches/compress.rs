@@ -1,12 +1,8 @@
-//! Compression benchmark.
-//!
-//! Contains benchmarks for FSST compression, decompression, and symbol table training.
-//!
-//! Also contains LZ4 baseline.
+//! Benchmarks for FSST compression, decompression, and symbol table training.
 #![allow(missing_docs)]
 use core::str;
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
 
 use fsst::{Compressor, ESCAPE_CODE};
 
@@ -34,13 +30,23 @@ fn bench_fsst(c: &mut Criterion) {
     let decompressor = compressor.decompressor();
     let decompressed = decompressor.decompress(&compressed);
     let decompressed = str::from_utf8(&decompressed).unwrap();
-    println!("DECODED: {}", decompressed);
-    assert_eq!(decompressed, TEST);
 
-    group.bench_function("compress-single", |b| {
-        b.iter(|| black_box(compressor.compress(black_box(plaintext))));
+    group.throughput(Throughput::Elements(1));
+    group.bench_function("compress-word", |b| {
+        let mut out = vec![0u8; 8];
+        let out_ptr = out.as_mut_ptr();
+        let front = &TEST.as_bytes()[0..8];
+        let word = u64::from_le_bytes(front.try_into().unwrap());
+
+        b.iter(|| black_box(unsafe { compressor.compress_word(word, out_ptr) }));
     });
 
+    group.throughput(Throughput::Bytes(CORPUS.len() as u64));
+    group.bench_function("compress-single", |b| {
+        b.iter(|| black_box(compressor.compress(black_box(CORPUS.as_bytes()))));
+    });
+
+    group.throughput(Throughput::Bytes(decompressed.len() as u64));
     group.bench_function("decompress-single", |b| {
         b.iter(|| black_box(decompressor.decompress(black_box(&compressed))));
     });

@@ -10,11 +10,9 @@ macro_rules! assert_sizeof {
 
 use std::fmt::{Debug, Formatter};
 
-pub use builder::*;
 use lossy_pht::LossyPHT;
 
 mod builder;
-mod find_longest;
 mod lossy_pht;
 
 /// `Symbol`s are small (up to 8-byte) segments of strings, stored in a [`Compressor`][`crate::Compressor`] and
@@ -43,9 +41,7 @@ impl Symbol {
 
     /// Create a new single-byte symbol
     pub fn from_u8(value: u8) -> Self {
-        Self {
-            bytes: [value, 0, 0, 0, 0, 0, 0, 0],
-        }
+        Self { num: value as u64 }
     }
 }
 
@@ -56,6 +52,7 @@ impl Symbol {
     /// can contain fewer bytes, padded with 0x00. There is a special case of a symbol
     /// that holds the byte 0x00. In that case, the symbol contains `0x0000000000000000`
     /// but we want to interpret that as a one-byte symbol containing `0x00`.
+    #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> usize {
         let numeric = unsafe { self.num };
         // For little-endian platforms, this counts the number of *trailing* zeros
@@ -69,13 +66,6 @@ impl Symbol {
         } else {
             len
         }
-    }
-
-    /// Returns true if the symbol does not encode any bytes.
-    ///
-    /// Note that this should only be true for the zero code.
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
     }
 
     #[inline]
@@ -120,18 +110,43 @@ impl Symbol {
         let new_len = self_len + other.len();
         assert!(new_len <= 8, "cannot build symbol with length > 8");
 
-        let mut result = *self;
+        // SAFETY: we assert the combined length <= 8
+        unsafe {
+            Self {
+                num: (other.num << (8 * self_len)) | self.num,
+            }
+        }
+    }
+}
 
-        // SAFETY: self_len and new_len are checked to be <= 8
-        unsafe { result.bytes[self_len..new_len].copy_from_slice(other.as_slice()) };
+#[cfg(test)]
+mod test {
+    use crate::Symbol;
 
-        result
+    #[test]
+    fn test_concat() {
+        let symbola = Symbol::from_u8(b'a');
+        let symbolb = Symbol::from_u8(b'b');
+        let symbolab = symbola.concat(&symbolb);
+        assert_eq!(symbolab.as_slice(), b"ab");
     }
 }
 
 impl Debug for Symbol {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", unsafe { self.bytes })
+        let debug = self
+            .as_slice()
+            .iter()
+            .map(|c| *c as char)
+            .map(|c| {
+                if c.is_ascii() {
+                    format!("{c}")
+                } else {
+                    format!("{c:X?}")
+                }
+            })
+            .collect::<Vec<String>>();
+        write!(f, "{:?}", debug)
     }
 }
 
@@ -299,7 +314,7 @@ impl<'a> Decompressor<'a> {
 #[derive(Clone)]
 pub struct Compressor {
     /// Table mapping codes to symbols.
-    pub(crate) symbols: [Symbol; 511],
+    pub(crate) symbols: Vec<Symbol>,
 
     /// The number of entries in the symbol table that have been populated, not counting
     /// the escape values.
@@ -317,8 +332,14 @@ pub struct Compressor {
 
 impl Default for Compressor {
     fn default() -> Self {
+        // NOTE: `vec!` has a specialization for building a new vector of `0u64`. Because Symbol and u64
+        //  have the same bit pattern, we can allocate as u64 and transmute. If we do `vec![Symbol::EMPTY; N]`,
+        // that will create a new Vec and call `Symbol::EMPTY.clone()` `N` times which is considerably slower.
+        let symbols = vec![0u64; 511];
+        // SAFETY: transmute safety assured by the compiler.
+        let symbols: Vec<Symbol> = unsafe { std::mem::transmute(symbols) };
         let mut table = Self {
-            symbols: [Symbol::ZERO; 511],
+            symbols,
             n_symbols: 0,
             codes_twobyte: vec![CodeMeta::EMPTY; 65_536],
             lossy_pht: LossyPHT::new(),
@@ -379,9 +400,8 @@ impl Compressor {
     /// # Safety
     ///
     /// `out_ptr` must never be NULL or otherwise point to invalid memory.
-    // NOTE(aduffy): uncomment this line to make the function appear in profiles
-    #[inline(never)]
-    pub(crate) unsafe fn compress_word(&self, word: u64, out_ptr: *mut u8) -> (usize, usize) {
+    #[inline]
+    pub unsafe fn compress_word(&self, word: u64, out_ptr: *mut u8) -> (usize, usize) {
         // Speculatively write the first byte of `word` at offset 1. This is necessary if it is an escape, and
         // if it isn't, it will be overwritten anyway.
         //
@@ -436,11 +456,11 @@ impl Compressor {
 
         // SAFETY: `end` will point just after the end of the `plaintext` slice.
         let in_end = unsafe { in_ptr.byte_add(plaintext.len()) };
-        let in_end_sub8 = unsafe { in_end.byte_sub(8) };
+        let in_end_sub8 = in_end as usize - 8;
         // SAFETY: `end` will point just after the end of the `values` allocation.
         let out_end = unsafe { out_ptr.byte_add(values.capacity()) };
 
-        while in_ptr < in_end_sub8 && out_ptr < out_end {
+        while (in_ptr as usize) < in_end_sub8 && out_ptr < out_end {
             // SAFETY: pointer ranges are checked in the loop condition
             unsafe {
                 // Load a full 8-byte word of data from in_ptr.
@@ -521,6 +541,7 @@ impl Compressor {
     }
 }
 
+#[inline]
 fn advance_8byte_word(word: u64, bytes: usize) -> u64 {
     // shift the word off the right-end, because little endian means the first
     // char is stored in the LSB.
@@ -534,6 +555,7 @@ fn advance_8byte_word(word: u64, bytes: usize) -> u64 {
     }
 }
 
+#[inline]
 fn compare_masked(left: u64, right: u64, ignored_bits: u16) -> bool {
     let mask = if ignored_bits == 64 {
         0
@@ -547,6 +569,7 @@ fn compare_masked(left: u64, right: u64, ignored_bits: u16) -> bool {
 /// This is a function that will get monomorphized based on the value of `N` to do
 /// a load of `N` values from the pointer in a minimum number of instructions into
 /// an output `u64`.
+#[inline]
 unsafe fn extract_u64<const N: usize>(ptr: *const u8) -> u64 {
     match N {
         1 => ptr.read() as u64,

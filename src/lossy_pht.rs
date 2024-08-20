@@ -60,15 +60,12 @@ pub(crate) struct LossyPHT {
 impl LossyPHT {
     /// Construct a new empty lossy perfect hash table
     pub(crate) fn new() -> Self {
-        let mut slots = Vec::with_capacity(HASH_TABLE_SIZE);
-        // Initialize all slots to empty entries
-        for _ in 0..HASH_TABLE_SIZE {
-            slots.push(TableEntry {
-                symbol: Symbol::ZERO,
-                code: CodeMeta::EMPTY,
-                ignored_bits: 64,
-            });
-        }
+        let slots = [TableEntry {
+            symbol: Symbol::ZERO,
+            code: CodeMeta::EMPTY,
+            ignored_bits: 64,
+        }]
+        .repeat(HASH_TABLE_SIZE);
 
         Self { slots }
     }
@@ -95,11 +92,13 @@ impl LossyPHT {
         }
     }
 
+    #[inline]
     pub(crate) fn lookup(&self, word: u64) -> TableEntry {
         let prefix_3bytes = word & 0xFF_FF_FF;
         let slot = self.hash(prefix_3bytes) as usize & (HASH_TABLE_SIZE - 1);
 
-        self.slots[slot]
+        // SAFETY: the slot is guaranteed to between 0...(HASH_TABLE_SIZE - 1).
+        unsafe { *self.slots.get_unchecked(slot) }
     }
 
     /// Hash a value to find the bucket it belongs in.

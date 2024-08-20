@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [ "develop" ]
-  pull_request: { }
-  workflow_dispatch: { }
+    branches: ["develop"]
+  pull_request: {}
+  workflow_dispatch: {}
 
 permissions:
   actions: read
@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   build:
-    name: 'build'
+    name: "build"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -40,7 +40,6 @@ jobs:
         uses: mozilla-actions/sccache-action@v0.0.5
       - name: Rust Compile Cache Config
         shell: bash
-        # echo "CARGO_LOG=cargo::core::compiler::fingerprint=info" >> $GITHUB_ENV
         run: |
           echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
           echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
