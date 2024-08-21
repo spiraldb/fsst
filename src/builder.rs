@@ -252,6 +252,14 @@ impl Compressor {
             counter.record_count1(code);
             counter.record_count2(prev_code, code);
 
+            // Record the first byte of `code` as its own symbol so that it is a candidate for merging
+            // with `prev_code`. This allows us to grow the symbol table by one byte rather than
+            // concatenating a full symbol.
+            if code >= 256 {
+                let first_byte = self.symbols[code as usize].first_byte();
+                counter.record_count2(prev_code, first_byte as u16);
+            }
+
             prev_code = code;
         }
     }
