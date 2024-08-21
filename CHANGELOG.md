@@ -6,6 +6,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.2](https://github.com/spiraldb/fsst/compare/v0.2.1...v0.2.2) - 2024-08-21
+
+### Other
+- implement second bitmap, ~2x speedup for train ([#21](https://github.com/spiraldb/fsst/pull/21))
+- remove spurious check ([#18](https://github.com/spiraldb/fsst/pull/18))
+
 ## [0.2.1](https://github.com/spiraldb/fsst/compare/v0.2.0...v0.2.1) - 2024-08-20
 
 ### Added
