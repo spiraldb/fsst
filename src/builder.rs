@@ -58,10 +58,6 @@ impl<'a> Iterator for CodesIterator<'a> {
             self.reference = self.index * 64;
         }
 
-        if self.block == 0 {
-            return None;
-        }
-
         // Find the next set bit in the current block.
         let position = self.block.trailing_zeros() as usize;
         let code = self.reference + position;
