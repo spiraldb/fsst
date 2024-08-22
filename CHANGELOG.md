@@ -6,6 +6,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.3](https://github.com/spiraldb/fsst/compare/v0.2.2...v0.2.3) - 2024-08-22
+
+### Added
+- reuse and clear instead of allocate, 2x speedup ([#22](https://github.com/spiraldb/fsst/pull/22))
+
 ## [0.2.2](https://github.com/spiraldb/fsst/compare/v0.2.1...v0.2.2) - 2024-08-21
 
 ### Other
