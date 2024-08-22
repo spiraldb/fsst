@@ -60,12 +60,14 @@ pub(crate) struct LossyPHT {
 impl LossyPHT {
     /// Construct a new empty lossy perfect hash table
     pub(crate) fn new() -> Self {
-        let slots = [TableEntry {
-            symbol: Symbol::ZERO,
-            code: CodeMeta::EMPTY,
-            ignored_bits: 64,
-        }]
-        .repeat(HASH_TABLE_SIZE);
+        let slots = vec![
+            TableEntry {
+                symbol: Symbol::ZERO,
+                code: CodeMeta::EMPTY,
+                ignored_bits: 64,
+            };
+            HASH_TABLE_SIZE
+        ];
 
         Self { slots }
     }
@@ -90,6 +92,13 @@ impl LossyPHT {
             entry.ignored_bits = (64 - 8 * symbol.len()) as u16;
             true
         }
+    }
+
+    /// Remove the symbol from the hashtable, if it exists.
+    pub(crate) fn remove(&mut self, symbol: Symbol) {
+        let prefix_3bytes = symbol.as_u64() & 0xFF_FF_FF;
+        let slot = self.hash(prefix_3bytes) as usize & (HASH_TABLE_SIZE - 1);
+        self.slots[slot].code = CodeMeta::EMPTY;
     }
 
     #[inline]

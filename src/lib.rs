@@ -320,9 +320,6 @@ pub struct Compressor {
     /// the escape values.
     pub(crate) n_symbols: u8,
 
-    //
-    // Index structures used to speedup building the symbol table and compression
-    //
     /// Inverted index mapping 2-byte symbols to codes
     codes_twobyte: Vec<CodeMeta>,
 
@@ -371,7 +368,7 @@ impl Compressor {
             // Insert the 2-byte symbol into the twobyte cache
             self.codes_twobyte[symbol.first_two_bytes() as usize] =
                 CodeMeta::new_symbol(self.n_symbols, symbol);
-        } else if symbol_len >= 3 {
+        } else {
             // Attempt to insert larger symbols into the 3-byte cache
             if !self.lossy_pht.insert(symbol, self.n_symbols) {
                 return false;

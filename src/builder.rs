@@ -7,7 +7,7 @@
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
-use crate::{Compressor, Symbol, ESCAPE_CODE, MAX_CODE};
+use crate::{CodeMeta, Compressor, Symbol, ESCAPE_CODE, MAX_CODE};
 
 /// Bitmap that only works for values up to 512
 #[derive(Clone, Copy, Debug, Default)]
@@ -42,6 +42,18 @@ impl CodesBitmap {
             block: self.codes[0],
             reference: 0,
         }
+    }
+
+    /// Clear the bitmap of all entries.
+    pub(crate) fn clear(&mut self) {
+        self.codes[0] = 0;
+        self.codes[1] = 0;
+        self.codes[2] = 0;
+        self.codes[3] = 0;
+        self.codes[4] = 0;
+        self.codes[5] = 0;
+        self.codes[6] = 0;
+        self.codes[7] = 0;
     }
 }
 
@@ -179,6 +191,15 @@ impl Counter {
     fn second_codes(&self, code1: u16) -> CodesIterator {
         self.pair_index[code1 as usize].codes()
     }
+
+    /// Clear the counters.
+    /// Note that this just touches the bitmaps and sets them all to invalid.
+    fn clear(&mut self) {
+        self.code1_index.clear();
+        for index in &mut self.pair_index {
+            index.clear();
+        }
+    }
 }
 
 /// The number of generations used for training. This is taken from the [FSST paper].
@@ -190,6 +211,26 @@ const MAX_GENERATIONS: usize = 5;
 const MAX_GENERATIONS: usize = 2;
 
 impl Compressor {
+    /// Clear all set items from the compressor.
+    ///
+    /// This is considerably faster than building a new Compressor from scratch for each
+    /// iteration of the `train` loop.
+    fn clear(&mut self) {
+        // Eliminate every observed code from the table.
+        for code in 0..(256 + self.n_symbols as usize) {
+            let symbol = self.symbols[code];
+            if symbol.len() <= 2 {
+                // Clear the codes_twobyte array
+                self.codes_twobyte[symbol.first_two_bytes() as usize] = CodeMeta::EMPTY;
+            } else {
+                // Clear the hashtable
+                self.lossy_pht.remove(symbol);
+            }
+        }
+
+        self.n_symbols = 0;
+    }
+
     /// Build and train a `Compressor` from a sample corpus of text.
     ///
     /// This function implements the generational algorithm described in the [FSST paper] Section
@@ -200,22 +241,24 @@ impl Compressor {
     ///
     /// [FSST paper]: https://www.vldb.org/pvldb/vol13/p2649-boncz.pdf
     pub fn train(corpus: impl AsRef<[u8]>) -> Self {
-        let mut compressor = Self::default();
+        let mut compressor = Compressor::default();
         // TODO(aduffy): handle truncating/sampling if corpus > requires sample size.
         let sample = corpus.as_ref();
         if sample.is_empty() {
             return compressor;
         }
 
+        let mut counter = Counter::new();
         for _generation in 0..(MAX_GENERATIONS - 1) {
-            let mut counter = Counter::new();
             compressor.compress_count(sample, &mut counter);
-            compressor = compressor.optimize(&counter, true);
+            compressor.optimize(&counter, true);
+            counter.clear();
         }
 
-        let mut counter = Counter::new();
         compressor.compress_count(sample, &mut counter);
-        compressor.optimize(&counter, true)
+        compressor.optimize(&counter, true);
+
+        compressor
     }
 }
 
@@ -258,19 +301,19 @@ impl Compressor {
 
     /// Using a set of counters and the existing set of symbols, build a new
     /// set of symbols/codes that optimizes the gain over the distribution in `counter`.
-    fn optimize(&self, counters: &Counter, include_ascii: bool) -> Self {
-        let mut res = Compressor::default();
+    fn optimize(&mut self, counters: &Counter, include_ascii: bool) {
         let mut pqueue = BinaryHeap::with_capacity(65_536);
 
         for code1 in counters.first_codes() {
             let symbol1 = self.symbols[code1 as usize];
+            let symbol1_len = symbol1.len();
             let count = counters.count1(code1);
             // If count is zero, we can skip the whole inner loop.
             if count == 0 {
                 continue;
             }
 
-            let mut gain = count * symbol1.len();
+            let mut gain = count * symbol1_len;
             // NOTE: use heuristic from C++ implementation to boost the gain of single-byte symbols.
             // This helps to reduce exception counts.
             if code1 < 256 {
@@ -287,7 +330,7 @@ impl Compressor {
                 let symbol2 = &self.symbols[code2 as usize];
 
                 // If merging would yield a symbol of length greater than 8, skip.
-                if symbol1.len() + symbol2.len() > 8 {
+                if symbol1_len + symbol2.len() > 8 {
                     continue;
                 }
                 let new_symbol = symbol1.concat(symbol2);
@@ -301,11 +344,14 @@ impl Compressor {
             }
         }
 
+        // clear self in advance of inserting the symbols.
+        self.clear();
+
         // Pop the 255 best symbols.
         let mut n_symbols = 0;
         while !pqueue.is_empty() && n_symbols < 255 {
             let candidate = pqueue.pop().unwrap();
-            if res.insert(candidate.symbol) {
+            if self.insert(candidate.symbol) {
                 n_symbols += 1;
             }
         }
@@ -323,13 +369,11 @@ impl Compressor {
                     break;
                 }
 
-                if res.insert(Symbol::from_u8(character)) {
+                if self.insert(Symbol::from_u8(character)) {
                     n_symbols += 1
                 }
             }
         }
-
-        res
     }
 }
 
