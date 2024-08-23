@@ -214,9 +214,12 @@ const FSST_SAMPLETARGET: usize = 1 << 14;
 const FSST_SAMPLEMAX: usize = 1 << 15;
 const FSST_SAMPLELINE: usize = 512;
 
-// Create a sample from a set of strings in the input
-//
-// SAFETY: sample_buf must be >= FSST_SAMPLEMAX bytes long. Providing something less may cause unexpected failures.
+/// Create a sample from a set of strings in the input.
+///
+/// Sample is constructing by copying "chunks" from the `str_in`s into the `sample_buf`, the
+/// returned slices are pointers into the `sample_buf`.
+///
+/// SAFETY: sample_buf must be >= FSST_SAMPLEMAX bytes long. Providing something less may cause unexpected failures.
 fn make_sample<'a, 'b: 'a>(sample_buf: &'a mut Vec<u8>, str_in: &Vec<&'b [u8]>) -> Vec<&'a [u8]> {
     debug_assert!(
         sample_buf.capacity() >= FSST_SAMPLEMAX,
@@ -319,12 +322,12 @@ impl Compressor {
         let mut counter = Counter::new();
         for _generation in 0..(MAX_GENERATIONS - 1) {
             compressor.compress_count(sample, &mut counter);
-            compressor.optimize(&counter, true);
+            compressor.optimize(&counter, 128);
             counter.clear();
         }
 
         compressor.compress_count(sample, &mut counter);
-        compressor.optimize(&counter, true);
+        compressor.optimize(&counter, 128);
 
         compressor
     }
@@ -338,17 +341,24 @@ impl Compressor {
         let mut compressor = Compressor::default();
 
         for sample_frac in [8usize, 38, 68, 98, 128] {
+            // let mut skips = 0;
             for i in 0..sample.len() {
                 if sample_frac < 128 {
                     if fsst_hash(i) & 127 > sample_frac {
+                        // skips += 1;
                         continue;
                     }
                 }
 
                 compressor.compress_count(sample[i], &mut counters);
             }
+            // println!(
+            //     "sampleFrac={sample_frac} -- skipped {} of {}",
+            //     skips,
+            //     sample.len()
+            // );
 
-            compressor.optimize(&counters, sample_frac == 128);
+            compressor.optimize(&counters, sample_frac);
             counters.clear();
         }
 
@@ -474,13 +484,19 @@ impl Compressor {
 
     /// Using a set of counters and the existing set of symbols, build a new
     /// set of symbols/codes that optimizes the gain over the distribution in `counter`.
-    fn optimize(&mut self, counters: &Counter, include_ascii: bool) {
+    fn optimize(&mut self, counters: &Counter, sample_frac: usize) {
         let mut pqueue = BinaryHeap::with_capacity(65_536);
 
         for code1 in counters.first_codes() {
             let symbol1 = self.symbols[code1 as usize];
             let symbol1_len = symbol1.len();
             let count = counters.count1(code1);
+
+            // From the c++ impl:
+            // "improves both compression speed (less candidates), but also quality!!"
+            if count < 5 * sample_frac / 128 {
+                continue;
+            }
 
             let mut gain = count * symbol1_len;
             // NOTE: use heuristic from C++ implementation to boost the gain of single-byte symbols.
@@ -494,6 +510,11 @@ impl Compressor {
                     symbol: symbol1,
                     gain,
                 });
+            }
+
+            // Skip on last round, or when symbol cannot be extended.
+            if sample_frac >= 128 || symbol1_len == 8 {
+                continue;
             }
 
             for code2 in counters.second_codes(code1) {
@@ -531,19 +552,19 @@ impl Compressor {
         //
         // Note that because of the lossy hash table, we won't accidentally
         // save the same ASCII character twice into the table.
-        if include_ascii {
-            for character in
-                " abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ[](){}:?/<>".bytes()
-            {
-                if n_symbols == 255 {
-                    break;
-                }
+        // if include_ascii {
+        //     for character in
+        //         " abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ[](){}:?/<>".bytes()
+        //     {
+        //         if n_symbols == 255 {
+        //             break;
+        //         }
 
-                if self.insert(Symbol::from_u8(character)) {
-                    n_symbols += 1
-                }
-            }
-        }
+        //         if self.insert(Symbol::from_u8(character)) {
+        //             n_symbols += 1
+        //         }
+        //     }
+        // }
     }
 }
 
@@ -588,8 +609,6 @@ impl Ord for Candidate {
 #[cfg(test)]
 mod test {
     use crate::{builder::CodesBitmap, Compressor, ESCAPE_CODE};
-
-    use super::{make_sample, FSST_SAMPLEMAX};
 
     #[test]
     fn test_builder() {

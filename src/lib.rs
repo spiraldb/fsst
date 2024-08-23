@@ -446,6 +446,17 @@ impl Compressor {
         (code.len() as usize, 1)
     }
 
+    /// Compress many lines in bulk.
+    pub fn compress_bulk(&self, lines: &Vec<&[u8]>) -> Vec<Vec<u8>> {
+        let mut res = Vec::new();
+
+        for line in lines {
+            res.push(self.compress(line));
+        }
+
+        res
+    }
+
     /// Use the symbol table to compress the plaintext into a sequence of codes and escapes.
     pub fn compress(&self, plaintext: &[u8]) -> Vec<u8> {
         if plaintext.is_empty() {
