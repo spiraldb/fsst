@@ -18,10 +18,7 @@ mod lossy_pht;
 /// `Symbol`s are small (up to 8-byte) segments of strings, stored in a [`Compressor`][`crate::Compressor`] and
 /// identified by an 8-bit code.
 #[derive(Copy, Clone)]
-pub union Symbol {
-    bytes: [u8; 8],
-    num: u64,
-}
+pub struct Symbol(u64);
 
 assert_sizeof!(Symbol => 8);
 
@@ -31,17 +28,26 @@ impl Symbol {
 
     /// Constructor for a `Symbol` from an 8-element byte slice.
     pub fn from_slice(slice: &[u8; 8]) -> Self {
-        Self { bytes: *slice }
+        let num: u64 = slice[0] as u64
+            | (slice[1] as u64) << 8
+            | (slice[2] as u64) << 16
+            | (slice[3] as u64) << 24
+            | (slice[4] as u64) << 32
+            | (slice[5] as u64) << 40
+            | (slice[6] as u64) << 48
+            | (slice[7] as u64) << 56;
+
+        Self(num)
     }
 
     /// Return a zero symbol
     const fn zero() -> Self {
-        Self { num: 0 }
+        Self(0)
     }
 
     /// Create a new single-byte symbol
     pub fn from_u8(value: u8) -> Self {
-        Self { num: value as u64 }
+        Self(value as u64)
     }
 }
 
@@ -53,8 +59,8 @@ impl Symbol {
     /// that holds the byte 0x00. In that case, the symbol contains `0x0000000000000000`
     /// but we want to interpret that as a one-byte symbol containing `0x00`.
     #[allow(clippy::len_without_is_empty)]
-    pub fn len(&self) -> usize {
-        let numeric = unsafe { self.num };
+    pub fn len(self) -> usize {
+        let numeric = self.0;
         // For little-endian platforms, this counts the number of *trailing* zeros
         let null_bytes = (numeric.leading_zeros() >> 3) as usize;
 
@@ -69,53 +75,33 @@ impl Symbol {
     }
 
     #[inline]
-    fn as_u64(&self) -> u64 {
-        // SAFETY: the bytes can always be viewed as a u64
-        unsafe { self.num }
+    fn as_u64(self) -> u64 {
+        self.0
     }
 
     /// Get the first byte of the symbol as a `u8`.
     ///
     /// If the symbol is empty, this will return the zero byte.
     #[inline]
-    pub fn first_byte(&self) -> u8 {
-        // SAFETY: the bytes can always be viewed as a u64
-        unsafe { self.num as u8 }
+    pub fn first_byte(self) -> u8 {
+        self.0 as u8
     }
 
     /// Get the first two bytes of the symbol as a `u16`.
     ///
     /// If the Symbol is one or zero bytes, this will return `0u16`.
     #[inline]
-    pub fn first_two_bytes(&self) -> u16 {
-        // SAFETY: the bytes can always be viewed as a u64
-        unsafe { self.num as u16 }
-    }
-
-    /// Access the Symbol as a slice.
-    pub fn as_slice(&self) -> &[u8] {
-        let len = self.len();
-        // SAFETY: constructors will not allow building a struct where len > 8.
-        unsafe { &self.bytes[0..len] }
-    }
-
-    /// Returns true if the symbol is a prefix of the provided text.
-    pub fn is_prefix(&self, text: &[u8]) -> bool {
-        text.starts_with(self.as_slice())
+    pub fn first_two_bytes(self) -> u16 {
+        self.0 as u16
     }
 
     /// Return a new `Symbol` by logically concatenating ourselves with another `Symbol`.
-    pub fn concat(&self, other: &Self) -> Self {
+    pub fn concat(self, other: Self) -> Self {
         let self_len = self.len();
         let new_len = self_len + other.len();
-        assert!(new_len <= 8, "cannot build symbol with length > 8");
+        debug_assert!(new_len <= 8, "cannot build symbol with length > 8");
 
-        // SAFETY: we assert the combined length <= 8
-        unsafe {
-            Self {
-                num: (other.num << (8 * self_len)) | self.num,
-            }
-        }
+        Self(other.0 << (8 * self_len) | self.0)
     }
 }
 
@@ -127,15 +113,15 @@ mod test {
     fn test_concat() {
         let symbola = Symbol::from_u8(b'a');
         let symbolb = Symbol::from_u8(b'b');
-        let symbolab = symbola.concat(&symbolb);
-        assert_eq!(symbolab.as_slice(), b"ab");
+        let symbolab = symbola.concat(symbolb);
+        assert_eq!(&symbolab.0.to_le_bytes()[0..symbolab.len()], b"ab");
     }
 }
 
 impl Debug for Symbol {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let debug = self
-            .as_slice()
+        let slice = &self.0.to_le_bytes()[0..self.len()];
+        let debug = slice
             .iter()
             .map(|c| *c as char)
             .map(|c| {
@@ -190,23 +176,23 @@ impl CodeMeta {
 
     /// Create a new code from a [`Symbol`].
     fn new_symbol(code: u8, symbol: Symbol) -> Self {
-        assert_ne!(code, ESCAPE_CODE, "ESCAPE_CODE cannot be used for symbol");
+        debug_assert_ne!(code, ESCAPE_CODE, "ESCAPE_CODE cannot be used for symbol");
 
         Self::new(code, false, symbol.len() as u16)
     }
 
     #[inline]
-    fn code(&self) -> u8 {
+    fn code(self) -> u8 {
         self.0 as u8
     }
 
     #[inline]
-    fn extended_code(&self) -> u16 {
+    fn extended_code(self) -> u16 {
         self.0 & 0b111_111_111
     }
 
     #[inline]
-    fn len(&self) -> u16 {
+    fn len(self) -> u16 {
         self.0 >> 12
     }
 }
@@ -275,14 +261,14 @@ impl<'a> Decompressor<'a> {
                 unsafe {
                     let write_addr = ptr.byte_offset(out_pos as isize) as *mut u64;
                     // Perform 8 byte unaligned write.
-                    write_addr.write_unaligned(symbol.num);
+                    write_addr.write_unaligned(symbol.as_u64());
                 }
                 in_pos += 1;
                 out_pos += symbol.len();
             }
         }
 
-        assert!(
+        debug_assert!(
             in_pos >= compressed.len(),
             "decompression should exhaust input before output"
         );
@@ -351,6 +337,21 @@ impl Default for Compressor {
     }
 }
 
+impl Compressor {
+    #[inline]
+    fn get_twobyte(&self, code: u16) -> CodeMeta {
+        unsafe { *self.codes_twobyte.get_unchecked(code as usize) }
+    }
+
+    #[inline]
+    fn put_twobyte(&mut self, code: u16, code_meta: CodeMeta) {
+        unsafe {
+            let ptr = self.codes_twobyte.get_unchecked_mut(code as usize);
+            *ptr = code_meta
+        }
+    }
+}
+
 /// The core structure of the FSST codec, holding a mapping between `Symbol`s and `Code`s.
 ///
 /// The symbol table is trained on a corpus of data in the form of a single byte array, building up
@@ -366,8 +367,10 @@ impl Compressor {
         let symbol_len = symbol.len();
         if symbol_len <= 2 {
             // Insert the 2-byte symbol into the twobyte cache
-            self.codes_twobyte[symbol.first_two_bytes() as usize] =
-                CodeMeta::new_symbol(self.n_symbols, symbol);
+            self.put_twobyte(
+                symbol.first_two_bytes(),
+                CodeMeta::new_symbol(self.n_symbols, symbol),
+            );
         } else {
             // Attempt to insert larger symbols into the 3-byte cache
             if !self.lossy_pht.insert(symbol, self.n_symbols) {
@@ -377,7 +380,10 @@ impl Compressor {
 
         // Insert at the end of the symbols table.
         // Note the rescaling from range [0-254] -> [256, 510].
-        self.symbols[256 + (self.n_symbols as usize)] = symbol;
+        unsafe {
+            *self.symbols.as_mut_ptr().add(256 + self.n_symbols as usize) = symbol;
+        }
+        // self.symbols[256 + (self.n_symbols as usize)] = symbol;
         self.n_symbols += 1;
         true
     }
@@ -415,7 +421,7 @@ impl Compressor {
         if !compare_masked(word, entry.symbol.as_u64(), ignored_bits) || entry.is_unused() {
             // lookup the appropriate code for the twobyte sequence and write it
             // This will hold either 511, OR it will hold the actual code.
-            let code = self.codes_twobyte[(word as u16) as usize];
+            let code = self.get_twobyte(word as u16);
             let out = code.code();
             unsafe {
                 out_ptr.write(out);
@@ -462,7 +468,7 @@ impl Compressor {
             unsafe {
                 // Load a full 8-byte word of data from in_ptr.
                 // SAFETY: caller asserts in_ptr is not null. we may read past end of pointer though.
-                let word: u64 = (in_ptr as *const u64).read_unaligned();
+                let word: u64 = std::ptr::read_unaligned(in_ptr as *const u64);
                 let (advance_in, advance_out) = self.compress_word(word, out_ptr);
                 in_ptr = in_ptr.byte_add(advance_in);
                 out_ptr = out_ptr.byte_add(advance_out);
@@ -534,12 +540,12 @@ impl Compressor {
     ///
     /// The returned slice will have length of `256 + n_symbols`.
     pub fn symbol_table(&self) -> &[Symbol] {
-        &self.symbols[0..(256 + self.n_symbols as usize)]
+        unsafe { std::slice::from_raw_parts(self.symbols.as_ptr(), 256 + self.n_symbols as usize) }
     }
 }
 
 #[inline]
-fn advance_8byte_word(word: u64, bytes: usize) -> u64 {
+pub(crate) fn advance_8byte_word(word: u64, bytes: usize) -> u64 {
     // shift the word off the right-end, because little endian means the first
     // char is stored in the LSB.
     //
@@ -553,7 +559,7 @@ fn advance_8byte_word(word: u64, bytes: usize) -> u64 {
 }
 
 #[inline]
-fn compare_masked(left: u64, right: u64, ignored_bits: u16) -> bool {
+pub(crate) fn compare_masked(left: u64, right: u64, ignored_bits: u16) -> bool {
     let mask = if ignored_bits == 64 {
         0
     } else {
@@ -567,33 +573,33 @@ fn compare_masked(left: u64, right: u64, ignored_bits: u16) -> bool {
 /// a load of `N` values from the pointer in a minimum number of instructions into
 /// an output `u64`.
 #[inline]
-unsafe fn extract_u64<const N: usize>(ptr: *const u8) -> u64 {
+pub(crate) unsafe fn extract_u64<const N: usize>(ptr: *const u8) -> u64 {
     match N {
-        1 => ptr.read() as u64,
-        2 => (ptr as *const u16).read_unaligned() as u64,
+        1 => std::ptr::read(ptr) as u64,
+        2 => std::ptr::read_unaligned(ptr as *const u16) as u64,
         3 => {
-            let low = ptr.read() as u64;
-            let high = (ptr.byte_add(1) as *const u16).read_unaligned() as u64;
+            let low = std::ptr::read(ptr) as u64;
+            let high = std::ptr::read_unaligned(ptr.byte_add(1) as *const u16) as u64;
             high << 8 | low
         }
-        4 => (ptr as *const u32).read_unaligned() as u64,
+        4 => std::ptr::read_unaligned(ptr as *const u32) as u64,
         5 => {
-            let low = (ptr as *const u32).read_unaligned() as u64;
+            let low = std::ptr::read_unaligned(ptr as *const u32) as u64;
             let high = ptr.byte_add(4).read() as u64;
             high << 32 | low
         }
         6 => {
-            let low = (ptr as *const u32).read_unaligned() as u64;
-            let high = (ptr.byte_add(4) as *const u16).read_unaligned() as u64;
+            let low = std::ptr::read_unaligned(ptr as *const u32) as u64;
+            let high = std::ptr::read_unaligned(ptr.byte_add(4) as *const u16) as u64;
             high << 32 | low
         }
         7 => {
-            let low = (ptr as *const u32).read_unaligned() as u64;
-            let mid = (ptr.byte_add(4) as *const u16).read_unaligned() as u64;
-            let high = ptr.byte_add(6).read() as u64;
+            let low = std::ptr::read_unaligned(ptr as *const u32) as u64;
+            let mid = std::ptr::read_unaligned(ptr.byte_add(4) as *const u16) as u64;
+            let high = std::ptr::read(ptr.byte_add(6)) as u64;
             (high << 48) | (mid << 32) | low
         }
-        8 => (ptr as *const u64).read_unaligned(),
+        8 => std::ptr::read_unaligned(ptr as *const u64),
         _ => unreachable!("N must be <= 8"),
     }
 }

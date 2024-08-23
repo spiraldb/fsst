@@ -15,7 +15,7 @@ pub const HASH_TABLE_SIZE: usize = 1 << 11;
 ///
 /// `TableEntry` is based on the `Symbol` class outlined in Algorithm 4 of the FSST paper. See
 /// the module documentation for a link to the paper.
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Debug)]
 #[repr(C)]
 pub(crate) struct TableEntry {
     /// Symbol, piece of a string, 8 bytes or fewer.
@@ -82,16 +82,30 @@ impl LossyPHT {
     pub(crate) fn insert(&mut self, symbol: Symbol, code: u8) -> bool {
         let prefix_3bytes = symbol.as_u64() & 0xFF_FF_FF;
         let slot = self.hash(prefix_3bytes) as usize & (HASH_TABLE_SIZE - 1);
-        let entry = &mut self.slots[slot];
 
-        if !entry.is_unused() {
-            false
-        } else {
-            entry.symbol = symbol;
-            entry.code = CodeMeta::new_symbol(code, symbol);
-            entry.ignored_bits = (64 - 8 * symbol.len()) as u16;
-            true
+        unsafe {
+            let entry = self.slots.as_mut_ptr().add(slot);
+            if (*entry).code.extended_code() != MAX_CODE {
+                // in-use
+                false
+            } else {
+                // unused
+                (*entry).symbol = symbol;
+                (*entry).code = CodeMeta::new_symbol(code, symbol);
+                (*entry).ignored_bits = (64 - 8 * symbol.len()) as u16;
+                true
+            }
         }
+
+        // let entry = &mut self.slots[slot];
+        // if !entry.is_unused() {
+        //     false
+        // } else {
+        //     entry.symbol = symbol;
+        //     entry.code = CodeMeta::new_symbol(code, symbol);
+        //     entry.ignored_bits = (64 - 8 * symbol.len()) as u16;
+        //     true
+        // }
     }
 
     /// Remove the symbol from the hashtable, if it exists.
@@ -102,12 +116,12 @@ impl LossyPHT {
     }
 
     #[inline]
-    pub(crate) fn lookup(&self, word: u64) -> TableEntry {
+    pub(crate) fn lookup(&self, word: u64) -> &TableEntry {
         let prefix_3bytes = word & 0xFF_FF_FF;
         let slot = self.hash(prefix_3bytes) as usize & (HASH_TABLE_SIZE - 1);
 
         // SAFETY: the slot is guaranteed to between 0...(HASH_TABLE_SIZE - 1).
-        unsafe { *self.slots.get_unchecked(slot) }
+        unsafe { self.slots.get_unchecked(slot) }
     }
 
     /// Hash a value to find the bucket it belongs in.

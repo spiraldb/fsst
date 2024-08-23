@@ -1,6 +1,6 @@
 #![cfg(test)]
 
-use fsst::{Compressor, Symbol};
+use fsst::Compressor;
 
 static PREAMBLE: &str = r#"
 When in the Course of human events, it becomes necessary for one people to dissolve
@@ -35,9 +35,7 @@ fn test_train_on_empty() {
 
 #[test]
 fn test_one_byte() {
-    let mut empty = Compressor::default();
-    // Assign code 0 to map to the symbol containing byte 0x01
-    empty.insert(Symbol::from_u8(0x01));
+    let empty = Compressor::train(&[0x01]);
 
     let compressed = empty.compress(&[0x01]);
     assert_eq!(compressed, vec![0u8]);

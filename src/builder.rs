@@ -7,7 +7,7 @@
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
-use crate::{CodeMeta, Compressor, Symbol, ESCAPE_CODE, MAX_CODE};
+use crate::{advance_8byte_word, extract_u64, CodeMeta, Compressor, Symbol, MAX_CODE};
 
 /// Bitmap that only works for values up to 512
 #[derive(Clone, Copy, Debug, Default)]
@@ -210,6 +210,70 @@ const MAX_GENERATIONS: usize = 5;
 #[cfg(miri)]
 const MAX_GENERATIONS: usize = 2;
 
+const FSST_SAMPLETARGET: usize = 1 << 14;
+const FSST_SAMPLEMAX: usize = 1 << 15;
+const FSST_SAMPLELINE: usize = 512;
+
+// Create a sample from a set of strings in the input
+//
+// SAFETY: sample_buf must be >= FSST_SAMPLEMAX bytes long. Providing something less may cause unexpected failures.
+fn make_sample<'a, 'b: 'a>(sample_buf: &'a mut Vec<u8>, str_in: &Vec<&'b [u8]>) -> Vec<&'a [u8]> {
+    debug_assert!(
+        sample_buf.capacity() >= FSST_SAMPLEMAX,
+        "sample_buf.len() < FSST_SAMPLEMAX"
+    );
+
+    let mut sample: Vec<&[u8]> = Vec::new();
+
+    let tot_size: usize = str_in.iter().map(|s| s.len()).sum();
+    if tot_size < FSST_SAMPLETARGET {
+        return str_in.clone();
+    }
+
+    let mut sample_rnd = fsst_hash(4637947);
+    let sample_lim = FSST_SAMPLETARGET;
+    let mut sample_buf_offset: usize = 0;
+
+    while sample_buf_offset < sample_lim {
+        sample_rnd = fsst_hash(sample_rnd);
+        let mut line_nr = sample_rnd % str_in.len();
+
+        // Find the first non-empty chunk starting at line_nr, wrapping around if
+        // necessary.
+        //
+        // TODO: this will loop infinitely if there are no non-empty lines in the sample
+        while str_in[line_nr].len() == 0 {
+            if line_nr == str_in.len() {
+                line_nr = 0;
+            }
+        }
+
+        let line = str_in[line_nr];
+        let chunks = 1 + ((line.len() - 1) / FSST_SAMPLELINE);
+        sample_rnd = fsst_hash(sample_rnd);
+        let chunk = FSST_SAMPLELINE * (sample_rnd % chunks);
+
+        let len = FSST_SAMPLELINE.min(line.len() - chunk);
+        // println!("extending sample with chunk str_in[{line_nr}][{chunk}...len={len}]");
+
+        sample_buf.extend_from_slice(&str_in[line_nr][chunk..chunk + len]);
+
+        // SAFETY: this is the data we just placed into `sample_buf` in the line above.
+        let slice =
+            unsafe { std::slice::from_raw_parts(sample_buf.as_ptr().add(sample_buf_offset), len) };
+
+        sample.push(slice);
+
+        sample_buf_offset += len;
+    }
+
+    sample
+}
+
+fn fsst_hash(value: usize) -> usize {
+    (value * 2971215073) ^ (value >> 15)
+}
+
 impl Compressor {
     /// Clear all set items from the compressor.
     ///
@@ -248,6 +312,10 @@ impl Compressor {
             return compressor;
         }
 
+        // Make the sample for each iteration.
+        //
+        // The sample is just a vector of slices, so we don't actually have to move anything around.
+
         let mut counter = Counter::new();
         for _generation in 0..(MAX_GENERATIONS - 1) {
             compressor.compress_count(sample, &mut counter);
@@ -260,42 +328,147 @@ impl Compressor {
 
         compressor
     }
+
+    /// Train on a collection of samples.
+    pub fn train_bulk(values: &Vec<&[u8]>) -> Self {
+        let mut sample_memory = Vec::with_capacity(FSST_SAMPLEMAX);
+        let sample = make_sample(&mut sample_memory, values);
+
+        let mut counters = Counter::new();
+        let mut compressor = Compressor::default();
+
+        for sample_frac in [8usize, 38, 68, 98, 128] {
+            for i in 0..sample.len() {
+                if sample_frac < 128 {
+                    if fsst_hash(i) & 127 > sample_frac {
+                        continue;
+                    }
+                }
+
+                compressor.compress_count(sample[i], &mut counters);
+            }
+
+            compressor.optimize(&counters, sample_frac == 128);
+            counters.clear();
+        }
+
+        compressor
+    }
 }
 
 impl Compressor {
     /// Compress the text using the current symbol table. Count the code occurrences
     /// and code-pair occurrences to allow us to calculate apparent gain.
+    ///
+    /// NOTE: this is largely an unfortunate amount of copy-paste from `compress`, just to make sure
+    /// we can do all the counting in a single pass.
     fn compress_count(&self, sample: &[u8], counter: &mut Counter) {
-        let compressed = self.compress(sample);
-        let len = compressed.len();
-
-        if len == 0 {
+        if sample.is_empty() {
             return;
         }
 
-        fn next_code(pos: usize, compressed: &[u8]) -> (u16, usize) {
-            if compressed[pos] == ESCAPE_CODE {
-                (compressed[pos + 1] as u16, 2)
-            } else {
-                (256 + compressed[pos] as u16, 1)
-            }
+        // Output space.
+        let mut out_buf = [0u8, 0u8];
+
+        let mut in_ptr = sample.as_ptr();
+        let out_ptr = out_buf.as_mut_ptr();
+
+        // SAFETY: `end` will point just after the end of the `plaintext` slice.
+        let in_end = unsafe { in_ptr.byte_add(sample.len()) };
+        let in_end_sub8 = in_end as usize - 8;
+
+        let mut prev_code: u16 = MAX_CODE;
+
+        while (in_ptr as usize) < in_end_sub8 {
+            // SAFETY: pointer ranges are checked in the loop condition
+            unsafe {
+                // Load a full 8-byte word of data from in_ptr.
+                // SAFETY: caller asserts in_ptr is not null. we may read past end of pointer though.
+                let word: u64 = std::ptr::read_unaligned(in_ptr as *const u64);
+                let (advance_in, advance_out) = self.compress_word(word, out_ptr);
+                match advance_out {
+                    1 => {
+                        // Record a true symbol
+                        let code_u16 = out_ptr.read() as u16 + 256u16;
+                        counter.record_count1(code_u16);
+                        if prev_code != MAX_CODE {
+                            counter.record_count2(prev_code, code_u16);
+                        }
+                        prev_code = code_u16;
+                    }
+                    2 => {
+                        // Record an escape.
+                        let escape_code = out_ptr.byte_offset(1).read() as u16;
+                        counter.record_count1(escape_code);
+                        if prev_code != MAX_CODE {
+                            counter.record_count2(prev_code, escape_code);
+                        }
+                        prev_code = escape_code;
+                    }
+                    _ => unreachable!("advance_out will only be 1 or 2 bytes"),
+                }
+
+                in_ptr = in_ptr.byte_add(advance_in);
+            };
         }
 
-        // Get first code, record count
-        let (code, pos) = next_code(0, &compressed);
-        counter.record_count1(code);
+        let remaining_bytes = unsafe { in_end.byte_offset_from(in_ptr) };
+        debug_assert!(
+            remaining_bytes.is_positive(),
+            "in_ptr exceeded in_end, should not be possible"
+        );
+        let remaining_bytes = remaining_bytes as usize;
 
-        let mut pos = pos;
-        let mut prev_code = code;
+        // Load the last `remaining_byte`s of data into a final world. We then replicate the loop above,
+        // but shift data out of this word rather than advancing an input pointer and potentially reading
+        // unowned memory.
+        let mut last_word = unsafe {
+            match remaining_bytes {
+                0 => 0,
+                1 => extract_u64::<1>(in_ptr),
+                2 => extract_u64::<2>(in_ptr),
+                3 => extract_u64::<3>(in_ptr),
+                4 => extract_u64::<4>(in_ptr),
+                5 => extract_u64::<5>(in_ptr),
+                6 => extract_u64::<6>(in_ptr),
+                7 => extract_u64::<7>(in_ptr),
+                8 => extract_u64::<8>(in_ptr),
+                _ => unreachable!("remaining bytes must be <= 8"),
+            }
+        };
 
-        while pos < len {
-            let (code, advance) = next_code(pos, &compressed);
-            pos += advance;
+        while in_ptr < in_end {
+            unsafe {
+                // Load a full 8-byte word of data from in_ptr.
+                // SAFETY: caller asserts in_ptr is not null. we may read past end of pointer though.
+                let (advance_in, advance_out) = self.compress_word(last_word, out_ptr);
 
-            counter.record_count1(code);
-            counter.record_count2(prev_code, code);
+                match advance_out {
+                    1 => {
+                        // Record a true symbol
+                        let code_u16 = out_buf[0] as u16 + 256u16;
+                        counter.record_count1(code_u16);
+                        if prev_code != MAX_CODE {
+                            counter.record_count2(prev_code, code_u16);
+                        }
+                        prev_code = code_u16;
+                    }
+                    2 => {
+                        // Record an escape.
+                        let escape_code = out_buf[1] as u16;
+                        counter.record_count1(escape_code);
+                        if prev_code != MAX_CODE {
+                            counter.record_count2(prev_code, escape_code);
+                        }
+                        prev_code = escape_code;
+                    }
+                    _ => unreachable!("advance_out will only be 1 or 2 bytes"),
+                }
 
-            prev_code = code;
+                in_ptr = in_ptr.byte_add(advance_in);
+
+                last_word = advance_8byte_word(last_word, advance_in);
+            }
         }
     }
 
@@ -308,10 +481,6 @@ impl Compressor {
             let symbol1 = self.symbols[code1 as usize];
             let symbol1_len = symbol1.len();
             let count = counters.count1(code1);
-            // If count is zero, we can skip the whole inner loop.
-            if count == 0 {
-                continue;
-            }
 
             let mut gain = count * symbol1_len;
             // NOTE: use heuristic from C++ implementation to boost the gain of single-byte symbols.
@@ -319,6 +488,7 @@ impl Compressor {
             if code1 < 256 {
                 gain *= 8;
             }
+
             if gain > 0 {
                 pqueue.push(Candidate {
                     symbol: symbol1,
@@ -327,7 +497,7 @@ impl Compressor {
             }
 
             for code2 in counters.second_codes(code1) {
-                let symbol2 = &self.symbols[code2 as usize];
+                let symbol2 = self.symbols[code2 as usize];
 
                 // If merging would yield a symbol of length greater than 8, skip.
                 if symbol1_len + symbol2.len() > 8 {
@@ -418,6 +588,8 @@ impl Ord for Candidate {
 #[cfg(test)]
 mod test {
     use crate::{builder::CodesBitmap, Compressor, ESCAPE_CODE};
+
+    use super::{make_sample, FSST_SAMPLEMAX};
 
     #[test]
     fn test_builder() {

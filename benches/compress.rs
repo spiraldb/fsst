@@ -1,6 +1,7 @@
 //! Benchmarks for FSST compression, decompression, and symbol table training.
 #![allow(missing_docs)]
 use core::str;
+use std::{fs::File, io::Read};
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
 
@@ -52,5 +53,23 @@ fn bench_fsst(c: &mut Criterion) {
     });
 }
 
-criterion_group!(compress_bench, bench_fsst);
+fn bench_tpch_comments(c: &mut Criterion) {
+    let mut group = c.benchmark_group("tpch");
+
+    // Load the entire file into memory
+    let mut file = File::open("/Users/aduffy/code/cwi-fsst/build/comments").unwrap();
+    let mut text = String::new();
+    file.read_to_string(&mut text).unwrap();
+
+    let lines: Vec<&str> = text.lines().collect();
+    let lines_sliced: Vec<&[u8]> = lines.iter().map(|s| s.as_bytes()).collect();
+
+    group.bench_function("compress-comments", |b| {
+        b.iter(|| {
+            std::hint::black_box(Compressor::train_bulk(&lines_sliced));
+        });
+    });
+}
+
+criterion_group!(compress_bench, bench_fsst, bench_tpch_comments);
 criterion_main!(compress_bench);
