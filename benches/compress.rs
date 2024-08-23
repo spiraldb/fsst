@@ -61,38 +61,35 @@ fn bench_dbtext(c: &mut Criterion) {
         let mut group = c.benchmark_group(name);
         download_dataset(url, path).unwrap();
 
-        let mut text = String::new();
-        let lines: Vec<&[u8]> = {
-            let mut file = File::open(path).unwrap();
-            file.read_to_string(&mut text).unwrap();
-
-            text.lines().map(|line| line.as_bytes()).collect()
-        };
+        let mut buf = Vec::new();
+        let mut file = File::open(path).unwrap();
+        file.read_to_end(&mut buf).unwrap();
 
         group.bench_function("train-and-compress", |b| {
             b.iter(|| {
-                let compressor = Compressor::train(&lines);
-                let _ =
-                    std::hint::black_box(compressor.compress_bulk(std::hint::black_box(&lines)));
+                let compressor = Compressor::train(&vec![&buf]);
+                let _ = std::hint::black_box(
+                    compressor.compress_bulk(std::hint::black_box(&vec![&buf])),
+                );
             });
         });
 
-        let compressor = Compressor::train(&lines);
-        group.throughput(Throughput::Bytes(
-            lines.iter().map(|l| l.len() as u64).sum::<u64>(),
-        ));
+        let compressor = Compressor::train(&vec![&buf]);
+        group.throughput(Throughput::Bytes(buf.len() as u64));
         group.bench_function("compress-only", |b| {
             b.iter(|| {
-                let _ =
-                    std::hint::black_box(compressor.compress_bulk(std::hint::black_box(&lines)));
+                let _ = std::hint::black_box(
+                    compressor.compress_bulk(std::hint::black_box(&vec![&buf])),
+                );
             });
         });
 
         group.finish();
 
         // Report the compression factor for this dataset.
-        let uncompressed_size = lines.iter().map(|l| l.len()).sum::<usize>();
-        let compressor = Compressor::train(&lines);
+        // let uncompressed_size = lines.iter().map(|l| l.len()).sum::<usize>();
+        let uncompressed_size = buf.len();
+        let compressor = Compressor::train(&vec![&buf]);
 
         // Show the symbols
         for code in 256..compressor.symbol_table().len() {
@@ -101,7 +98,7 @@ fn bench_dbtext(c: &mut Criterion) {
             println!("symbol[{code}] = {symbol:?}");
         }
 
-        let compressed = compressor.compress_bulk(&lines);
+        let compressed = compressor.compress_bulk(&vec![&buf]);
         let compressed_size = compressed.iter().map(|l| l.len()).sum::<usize>();
         let ratio = 100.0 * (compressed_size as f64) / (uncompressed_size as f64);
         println!(

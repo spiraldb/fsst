@@ -38,6 +38,10 @@ test = false
 name = "compress"
 harness = false
 
+[[bench]]
+name = "toy"
+harness = false
+
 [[test]]
 name = "correctness"
 test = true

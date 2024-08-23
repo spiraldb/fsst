@@ -529,7 +529,7 @@ impl Compressor {
         //
         // Note that because of the lossy hash table, we won't accidentally
         // save the same ASCII character twice into the table.
-        if sample_frac < 128 {
+        if sample_frac == 128 {
             for character in
                 " abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ[](){}:?/<>".bytes()
             {

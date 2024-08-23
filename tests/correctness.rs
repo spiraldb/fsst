@@ -78,3 +78,13 @@ fn test_chinese() {
             .decompress(&trained.compress(ART_OF_WAR.as_bytes()))
     );
 }
+
+// DELETE THIS
+#[test]
+fn test_codepath() {
+    let mut compressor = Compressor::default();
+    compressor.insert(Symbol::from_slice(&[b'a', b'b', b'c', b'd', 0, 0, 0, 0]));
+
+    let output = std::hint::black_box(compressor.compress(b"abcd"));
+    assert_eq!(output.len(), 1);
+}

@@ -107,19 +107,24 @@ impl Symbol {
 
 impl Debug for Symbol {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[")?;
+
         let slice = &self.0.to_le_bytes()[0..self.len()];
-        let debug = slice
-            .iter()
-            .map(|c| *c as char)
-            .map(|c| {
-                if c.is_ascii() {
-                    format!("{c}")
-                } else {
-                    format!("{c:X?}")
-                }
-            })
-            .collect::<Vec<String>>();
-        write!(f, "{:?}", debug)
+        for c in slice.iter().map(|c| *c as char) {
+            if c >= '!' && c <= '~' {
+                write!(f, "{c}")?;
+            } else if c == '\n' {
+                write!(f, " \\n ")?;
+            } else if c == '\t' {
+                write!(f, " \\t ")?;
+            } else if c == ' ' {
+                write!(f, " SPACE ")?;
+            } else {
+                write!(f, "{c:X?}")?
+            }
+        }
+
+        write!(f, "]")
     }
 }
 
@@ -392,6 +397,7 @@ impl Compressor {
     /// `out_ptr` must never be NULL or otherwise point to invalid memory.
     #[inline]
     pub unsafe fn compress_word(&self, word: u64, out_ptr: *mut u8) -> (usize, usize) {
+        println!("fast path");
         // Speculatively write the first byte of `word` at offset 1. This is necessary if it is an escape, and
         // if it isn't, it will be overwritten anyway.
         //
@@ -461,7 +467,7 @@ impl Compressor {
         // SAFETY: `end` will point just after the end of the `values` allocation.
         let out_end = unsafe { out_ptr.byte_add(values.capacity()) };
 
-        while (in_ptr as usize) < in_end_sub8 && out_ptr < out_end {
+        while (in_ptr as usize) <= in_end_sub8 && out_ptr < out_end {
             // SAFETY: pointer ranges are checked in the loop condition
             unsafe {
                 // Load a full 8-byte word of data from in_ptr.
@@ -475,7 +481,7 @@ impl Compressor {
 
         let remaining_bytes = unsafe { in_end.byte_offset_from(in_ptr) };
         assert!(
-            remaining_bytes.is_positive(),
+            in_ptr == in_end || remaining_bytes.is_positive(),
             "in_ptr exceeded in_end, should not be possible"
         );
         let remaining_bytes = remaining_bytes as usize;
@@ -499,6 +505,7 @@ impl Compressor {
         };
 
         while in_ptr < in_end && out_ptr < out_end {
+            // println!("slow path");
             unsafe {
                 // Load a full 8-byte word of data from in_ptr.
                 // SAFETY: caller asserts in_ptr is not null. we may read past end of pointer though.
