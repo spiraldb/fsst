@@ -206,9 +206,9 @@ impl Counter {
 ///
 /// [FSST paper]: https://www.vldb.org/pvldb/vol13/p2649-boncz.pdf
 #[cfg(not(miri))]
-const MAX_GENERATIONS: usize = 5;
+const GENERATIONS: [usize; 5] = [8usize, 38, 68, 98, 128];
 #[cfg(miri)]
-const MAX_GENERATIONS: usize = 2;
+const GENERATIONS: [usize; 3] = [8usize, 38, 128];
 
 const FSST_SAMPLETARGET: usize = 1 << 14;
 const FSST_SAMPLEMAX: usize = 1 << 15;
@@ -220,6 +220,7 @@ const FSST_SAMPLELINE: usize = 512;
 /// returned slices are pointers into the `sample_buf`.
 ///
 /// SAFETY: sample_buf must be >= FSST_SAMPLEMAX bytes long. Providing something less may cause unexpected failures.
+#[allow(clippy::ptr_arg)]
 fn make_sample<'a, 'b: 'a>(sample_buf: &'a mut Vec<u8>, str_in: &Vec<&'b [u8]>) -> Vec<&'a [u8]> {
     debug_assert!(
         sample_buf.capacity() >= FSST_SAMPLEMAX,
@@ -239,13 +240,13 @@ fn make_sample<'a, 'b: 'a>(sample_buf: &'a mut Vec<u8>, str_in: &Vec<&'b [u8]>) 
 
     while sample_buf_offset < sample_lim {
         sample_rnd = fsst_hash(sample_rnd);
-        let mut line_nr = sample_rnd % str_in.len();
+        let mut line_nr = (sample_rnd as usize) % str_in.len();
 
         // Find the first non-empty chunk starting at line_nr, wrapping around if
         // necessary.
         //
         // TODO: this will loop infinitely if there are no non-empty lines in the sample
-        while str_in[line_nr].len() == 0 {
+        while str_in[line_nr].is_empty() {
             if line_nr == str_in.len() {
                 line_nr = 0;
             }
@@ -254,10 +255,9 @@ fn make_sample<'a, 'b: 'a>(sample_buf: &'a mut Vec<u8>, str_in: &Vec<&'b [u8]>) 
         let line = str_in[line_nr];
         let chunks = 1 + ((line.len() - 1) / FSST_SAMPLELINE);
         sample_rnd = fsst_hash(sample_rnd);
-        let chunk = FSST_SAMPLELINE * (sample_rnd % chunks);
+        let chunk = FSST_SAMPLELINE * ((sample_rnd as usize) % chunks);
 
         let len = FSST_SAMPLELINE.min(line.len() - chunk);
-        // println!("extending sample with chunk str_in[{line_nr}][{chunk}...len={len}]");
 
         sample_buf.extend_from_slice(&str_in[line_nr][chunk..chunk + len]);
 
@@ -273,7 +273,11 @@ fn make_sample<'a, 'b: 'a>(sample_buf: &'a mut Vec<u8>, str_in: &Vec<&'b [u8]>) 
     sample
 }
 
-fn fsst_hash(value: usize) -> usize {
+/// Hash function used in various components of the library.
+///
+/// This is equivalent to the FSST_HASH macro from the C++ implementation.
+#[inline]
+pub(crate) fn fsst_hash(value: u64) -> u64 {
     (value * 2971215073) ^ (value >> 15)
 }
 
@@ -307,56 +311,24 @@ impl Compressor {
     /// code).
     ///
     /// [FSST paper]: https://www.vldb.org/pvldb/vol13/p2649-boncz.pdf
-    pub fn train(corpus: impl AsRef<[u8]>) -> Self {
-        let mut compressor = Compressor::default();
-        // TODO(aduffy): handle truncating/sampling if corpus > requires sample size.
-        let sample = corpus.as_ref();
-        if sample.is_empty() {
-            return compressor;
-        }
-
-        // Make the sample for each iteration.
-        //
-        // The sample is just a vector of slices, so we don't actually have to move anything around.
-
-        let mut counter = Counter::new();
-        for _generation in 0..(MAX_GENERATIONS - 1) {
-            compressor.compress_count(sample, &mut counter);
-            compressor.optimize(&counter, 128);
-            counter.clear();
-        }
-
-        compressor.compress_count(sample, &mut counter);
-        compressor.optimize(&counter, 128);
-
-        compressor
-    }
-
-    /// Train on a collection of samples.
-    pub fn train_bulk(values: &Vec<&[u8]>) -> Self {
-        let mut sample_memory = Vec::with_capacity(FSST_SAMPLEMAX);
-        let sample = make_sample(&mut sample_memory, values);
-
+    pub fn train(values: &Vec<&[u8]>) -> Self {
         let mut counters = Counter::new();
         let mut compressor = Compressor::default();
 
-        for sample_frac in [8usize, 38, 68, 98, 128] {
-            // let mut skips = 0;
-            for i in 0..sample.len() {
-                if sample_frac < 128 {
-                    if fsst_hash(i) & 127 > sample_frac {
-                        // skips += 1;
-                        continue;
-                    }
+        if values.is_empty() {
+            return compressor;
+        }
+
+        let mut sample_memory = Vec::with_capacity(FSST_SAMPLEMAX);
+        let sample = make_sample(&mut sample_memory, values);
+        for sample_frac in GENERATIONS {
+            for (i, line) in sample.iter().enumerate() {
+                if sample_frac < 128 && ((fsst_hash(i as u64) & 127) as usize) > sample_frac {
+                    continue;
                 }
 
-                compressor.compress_count(sample[i], &mut counters);
+                compressor.compress_count(line, &mut counters);
             }
-            // println!(
-            //     "sampleFrac={sample_frac} -- skipped {} of {}",
-            //     skips,
-            //     sample.len()
-            // );
 
             compressor.optimize(&counters, sample_frac);
             counters.clear();
@@ -403,6 +375,11 @@ impl Compressor {
                         counter.record_count1(code_u16);
                         if prev_code != MAX_CODE {
                             counter.record_count2(prev_code, code_u16);
+                            // Also record the first byte of the next code
+                            let first_byte_code =
+                                self.symbols[code_u16 as usize].first_byte() as u16;
+                            counter.record_count1(first_byte_code);
+                            counter.record_count2(prev_code, first_byte_code);
                         }
                         prev_code = code_u16;
                     }
@@ -494,9 +471,9 @@ impl Compressor {
 
             // From the c++ impl:
             // "improves both compression speed (less candidates), but also quality!!"
-            if count < 5 * sample_frac / 128 {
-                continue;
-            }
+            // if count < (5 * sample_frac / 128) {
+            //     continue;
+            // }
 
             let mut gain = count * symbol1_len;
             // NOTE: use heuristic from C++ implementation to boost the gain of single-byte symbols.
@@ -512,7 +489,7 @@ impl Compressor {
                 });
             }
 
-            // Skip on last round, or when symbol cannot be extended.
+            // Skip merges on last round, or when symbol cannot be extended.
             if sample_frac >= 128 || symbol1_len == 8 {
                 continue;
             }
@@ -552,19 +529,19 @@ impl Compressor {
         //
         // Note that because of the lossy hash table, we won't accidentally
         // save the same ASCII character twice into the table.
-        // if include_ascii {
-        //     for character in
-        //         " abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ[](){}:?/<>".bytes()
-        //     {
-        //         if n_symbols == 255 {
-        //             break;
-        //         }
+        if sample_frac < 128 {
+            for character in
+                " abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ[](){}:?/<>".bytes()
+            {
+                if n_symbols == 255 {
+                    break;
+                }
 
-        //         if self.insert(Symbol::from_u8(character)) {
-        //             n_symbols += 1
-        //         }
-        //     }
-        // }
+                if self.insert(Symbol::from_u8(character)) {
+                    n_symbols += 1
+                }
+            }
+        }
     }
 }
 
@@ -613,11 +590,13 @@ mod test {
     #[test]
     fn test_builder() {
         // Train a Compressor on the toy string
-        let text = "hello world";
-        let table = Compressor::train(text.as_bytes());
+        let text = b"hello hello hello hello";
+
+        // count of 5 is the cutoff for including a symbol in the table.
+        let table = Compressor::train(&vec![text, text, text, text, text]);
 
         // Use the table to compress a string, see the values
-        let compressed = table.compress(text.as_bytes());
+        let compressed = table.compress(text);
 
         // Ensure that the compressed string has no escape bytes
         assert!(compressed.iter().all(|b| *b != ESCAPE_CODE));

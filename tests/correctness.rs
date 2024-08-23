@@ -1,6 +1,6 @@
 #![cfg(test)]
 
-use fsst::Compressor;
+use fsst::{Compressor, Symbol};
 
 static PREAMBLE: &str = r#"
 When in the Course of human events, it becomes necessary for one people to dissolve
@@ -16,7 +16,7 @@ static ART_OF_WAR: &str = include_str!("./fixtures/art_of_war.txt");
 #[test]
 fn test_basic() {
     // Roundtrip the declaration
-    let trained = Compressor::train(PREAMBLE);
+    let trained = Compressor::train(&vec![PREAMBLE.as_bytes()]);
     let compressed = trained.compress(PREAMBLE.as_bytes());
     let decompressed = trained.decompressor().decompress(&compressed);
     assert_eq!(decompressed, PREAMBLE.as_bytes());
@@ -24,7 +24,7 @@ fn test_basic() {
 
 #[test]
 fn test_train_on_empty() {
-    let trained = Compressor::train("");
+    let trained = Compressor::train(&vec![]);
     // We can still compress with it, but the symbols are going to be empty.
     let compressed = trained.compress("the quick brown fox jumped over the lazy dog".as_bytes());
     assert_eq!(
@@ -35,7 +35,8 @@ fn test_train_on_empty() {
 
 #[test]
 fn test_one_byte() {
-    let empty = Compressor::train(&[0x01]);
+    let mut empty = Compressor::default();
+    empty.insert(Symbol::from_u8(0x01));
 
     let compressed = empty.compress(&[0x01]);
     assert_eq!(compressed, vec![0u8]);
@@ -46,7 +47,7 @@ fn test_one_byte() {
 #[test]
 fn test_zeros() {
     let training_data: Vec<u8> = vec![0, 1, 2, 3, 4, 0];
-    let trained = Compressor::train(&training_data);
+    let trained = Compressor::train(&vec![&training_data]);
     let compressed = trained.compress(&[4, 0]);
     assert_eq!(trained.decompressor().decompress(&compressed), &[4, 0]);
 }
@@ -56,7 +57,7 @@ fn test_zeros() {
 fn test_large() {
     let corpus: Vec<u8> = DECLARATION.bytes().cycle().take(10_240).collect();
 
-    let trained = Compressor::train(&corpus);
+    let trained = Compressor::train(&vec![&corpus]);
     let massive: Vec<u8> = DECLARATION
         .bytes()
         .cycle()
@@ -69,7 +70,7 @@ fn test_large() {
 
 #[test]
 fn test_chinese() {
-    let trained = Compressor::train(ART_OF_WAR.as_bytes());
+    let trained = Compressor::train(&vec![ART_OF_WAR.as_bytes()]);
     assert_eq!(
         ART_OF_WAR.as_bytes(),
         trained

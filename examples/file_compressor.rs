@@ -37,12 +37,11 @@ fn main() {
 
     let mut output = File::create(output_path).unwrap();
 
-    let compressor = Compressor::train_bulk(&lines);
+    let compressor = Compressor::train(&lines);
     let mut compressed_size = 0;
     for text in lines {
-        let compressed = compressor.compress(&text);
-        compressed_size += compressed.len();
-        output.write(&compressed).unwrap();
+        let compressed = compressor.compress(text);
+        compressed_size += output.write(&compressed).unwrap();
     }
 
     println!(

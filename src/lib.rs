@@ -105,19 +105,6 @@ impl Symbol {
     }
 }
 
-#[cfg(test)]
-mod test {
-    use crate::Symbol;
-
-    #[test]
-    fn test_concat() {
-        let symbola = Symbol::from_u8(b'a');
-        let symbolb = Symbol::from_u8(b'b');
-        let symbolab = symbola.concat(symbolb);
-        assert_eq!(&symbolab.0.to_le_bytes()[0..symbolab.len()], b"ab");
-    }
-}
-
 impl Debug for Symbol {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let slice = &self.0.to_le_bytes()[0..self.len()];
@@ -557,7 +544,7 @@ impl Compressor {
 
 #[inline]
 pub(crate) fn advance_8byte_word(word: u64, bytes: usize) -> u64 {
-    // shift the word off the right-end, because little endian means the first
+    // shift the word off the low-end, because little endian means the first
     // char is stored in the LSB.
     //
     // Note that even though this looks like it branches, Rust compiles this to a

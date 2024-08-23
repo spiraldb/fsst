@@ -63,7 +63,7 @@ fn bench_dbtext(c: &mut Criterion) {
 
         let mut text = String::new();
         let lines: Vec<&[u8]> = {
-            let mut file = File::open("benches/data/wikipedia").unwrap();
+            let mut file = File::open(path).unwrap();
             file.read_to_string(&mut text).unwrap();
 
             text.lines().map(|line| line.as_bytes()).collect()
@@ -71,13 +71,13 @@ fn bench_dbtext(c: &mut Criterion) {
 
         group.bench_function("train-and-compress", |b| {
             b.iter(|| {
-                let compressor = Compressor::train_bulk(&lines);
+                let compressor = Compressor::train(&lines);
                 let _ =
                     std::hint::black_box(compressor.compress_bulk(std::hint::black_box(&lines)));
             });
         });
 
-        let compressor = Compressor::train_bulk(&lines);
+        let compressor = Compressor::train(&lines);
         group.throughput(Throughput::Bytes(
             lines.iter().map(|l| l.len() as u64).sum::<u64>(),
         ));
@@ -89,6 +89,24 @@ fn bench_dbtext(c: &mut Criterion) {
         });
 
         group.finish();
+
+        // Report the compression factor for this dataset.
+        let uncompressed_size = lines.iter().map(|l| l.len()).sum::<usize>();
+        let compressor = Compressor::train(&lines);
+
+        // Show the symbols
+        for code in 256..compressor.symbol_table().len() {
+            let symbol = compressor.symbol_table()[code];
+            let code = code - 256;
+            println!("symbol[{code}] = {symbol:?}");
+        }
+
+        let compressed = compressor.compress_bulk(&lines);
+        let compressed_size = compressed.iter().map(|l| l.len()).sum::<usize>();
+        let ratio = 100.0 * (compressed_size as f64) / (uncompressed_size as f64);
+        println!(
+            "compressed {name} {uncompressed_size} => {compressed_size}B ({ratio}% of original)"
+        )
     }
 
     run_dataset_bench(
@@ -111,81 +129,14 @@ fn bench_dbtext(c: &mut Criterion) {
         "benches/data/urls",
         c,
     );
+
+    run_dataset_bench(
+        "dbtext/urls",
+        "https://raw.githubusercontent.com/cwida/fsst/4e188a/paper/dbtext/urls",
+        "benches/data/urls",
+        c,
+    );
 }
 
-fn bench_tpch_comments(c: &mut Criterion) {
-    let mut group = c.benchmark_group("tpch");
-
-    group.bench_function("train-only", |b| {
-        b.iter(|| {
-            let mut file = File::open("/Users/aduffy/code/cwi-fsst/build/comments").unwrap();
-            let mut text = String::new();
-            file.read_to_string(&mut text).unwrap();
-
-            let lines: Vec<&str> = text.lines().collect();
-            let lines_sliced: Vec<&[u8]> = lines.iter().map(|s| s.as_bytes()).collect();
-
-            let _ =
-                std::hint::black_box(Compressor::train_bulk(std::hint::black_box(&lines_sliced)));
-            // let _ = std::hint::black_box(compressor.compress_bulk(&lines_sliced));
-        });
-    });
-
-    let mut file = File::open("/Users/aduffy/code/cwi-fsst/build/comments").unwrap();
-    let mut text = String::new();
-    file.read_to_string(&mut text).unwrap();
-
-    let lines: Vec<&str> = text.lines().collect();
-    let lines_sliced: Vec<&[u8]> = lines.iter().map(|s| s.as_bytes()).collect();
-
-    let compressor = Compressor::train_bulk(&lines_sliced);
-
-    group.throughput(Throughput::Bytes(
-        lines.iter().map(|l| l.len() as u64).sum::<u64>(),
-    ));
-    group.bench_function("compress-only", |b| {
-        b.iter(|| {
-            let _ = std::hint::black_box(compressor.compress_bulk(&lines_sliced));
-        });
-    });
-
-    group.bench_function("train-and-compress", |b| {
-        b.iter(|| {
-            let mut file = File::open("/Users/aduffy/code/cwi-fsst/build/comments").unwrap();
-            let mut text = String::new();
-            file.read_to_string(&mut text).unwrap();
-
-            let lines: Vec<&str> = text.lines().collect();
-            let lines_sliced: Vec<&[u8]> = lines.iter().map(|s| s.as_bytes()).collect();
-
-            let compressor = Compressor::train_bulk(&lines_sliced);
-            let _ = std::hint::black_box(compressor.compress_bulk(&lines_sliced));
-        });
-    });
-
-    group.finish();
-
-    let mut file = File::open("/Users/aduffy/code/cwi-fsst/build/comments").unwrap();
-    let mut text = String::new();
-    file.read_to_string(&mut text).unwrap();
-
-    let lines: Vec<&str> = text.lines().collect();
-    let lines_sliced: Vec<&[u8]> = lines.iter().map(|s| s.as_bytes()).collect();
-    let mut lines_total = Vec::new();
-    for slice in &lines_sliced {
-        lines_total.extend_from_slice(slice);
-    }
-
-    let compressor = Compressor::train_bulk(&lines_sliced);
-    let compressed = compressor.compress(&lines_total);
-
-    println!(
-        "compressed {} => {} ({}%)",
-        lines_total.len(),
-        compressed.len(),
-        100.0 * (compressed.len() as f64) / (lines_total.len() as f64),
-    )
-}
-
-criterion_group!(compress_bench, bench_tpch_comments, bench_dbtext);
+criterion_group!(compress_bench, bench_dbtext);
 criterion_main!(compress_bench);
