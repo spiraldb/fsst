@@ -7,7 +7,10 @@
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
-use crate::{advance_8byte_word, extract_u64, CodeMeta, Compressor, Symbol, MAX_CODE};
+use crate::{
+    advance_8byte_word, compare_masked, extract_u64, CodeMeta, Compressor, Symbol, ESCAPE_CODE,
+    FSST_CODE_MAX,
+};
 
 /// Bitmap that only works for values up to 512
 #[derive(Clone, Copy, Debug, Default)]
@@ -20,7 +23,10 @@ assert_sizeof!(CodesBitmap => 64);
 impl CodesBitmap {
     /// Set the indicated bit. Must be between 0 and [`MAX_CODE`][crate::MAX_CODE].
     pub(crate) fn set(&mut self, index: usize) {
-        debug_assert!(index <= MAX_CODE as usize, "code cannot exceed {MAX_CODE}");
+        debug_assert!(
+            index <= FSST_CODE_MAX as usize,
+            "code cannot exceed {FSST_CODE_MAX}"
+        );
 
         let map = index >> 6;
         self.codes[map] |= 1 << (index % 64);
@@ -28,7 +34,10 @@ impl CodesBitmap {
 
     /// Check if `index` is present in the bitmap
     pub(crate) fn is_set(&self, index: usize) -> bool {
-        debug_assert!(index <= MAX_CODE as usize, "code cannot exceed {MAX_CODE}");
+        debug_assert!(
+            index <= FSST_CODE_MAX as usize,
+            "code cannot exceed {FSST_CODE_MAX}"
+        );
 
         let map = index >> 6;
         self.codes[map] & 1 << (index % 64) != 0
@@ -78,6 +87,10 @@ impl<'a> Iterator for CodesIterator<'a> {
             self.reference = self.index * 64;
         }
 
+        if self.reference >= 511 {
+            return None;
+        }
+
         // Find the next set bit in the current block.
         let position = self.block.trailing_zeros() as usize;
         let code = self.reference + position;
@@ -112,9 +125,13 @@ struct Counter {
     pair_index: Vec<CodesBitmap>,
 }
 
-const COUNTS1_SIZE: usize = MAX_CODE as usize;
+const COUNTS1_SIZE: usize = (FSST_CODE_MAX + 1) as usize;
+
 // NOTE: in Rust, creating a 1D vector of length N^2 is ~4x faster than creating a 2-D vector,
 //  because `vec!` has a specialization for zero.
+//
+// We also include +1 extra row at the end so that we can do writes into the counters without a branch
+// for the first iteration.
 const COUNTS2_SIZE: usize = COUNTS1_SIZE * COUNTS1_SIZE;
 
 impl Counter {
@@ -138,20 +155,23 @@ impl Counter {
 
     #[inline]
     fn record_count1(&mut self, code1: u16) {
-        if self.code1_index.is_set(code1 as usize) {
-            self.counts1[code1 as usize] += 1;
+        // If not set, we want to start at one.
+        let base = if self.code1_index.is_set(code1 as usize) {
+            self.counts1[code1 as usize]
         } else {
-            self.counts1[code1 as usize] = 1;
-        }
+            0
+        };
+
+        self.counts1[code1 as usize] = base + 1;
         self.code1_index.set(code1 as usize);
     }
 
     #[inline]
     fn record_count2(&mut self, code1: u16, code2: u16) {
-        debug_assert!(self.code1_index.is_set(code1 as usize));
+        debug_assert!(code1 == FSST_CODE_MAX || self.code1_index.is_set(code1 as usize));
         debug_assert!(self.code1_index.is_set(code2 as usize));
 
-        let idx = (code1 as usize) * 511 + (code2 as usize);
+        let idx = (code1 as usize) * COUNTS1_SIZE + (code2 as usize);
         if self.pair_index[code1 as usize].is_set(code2 as usize) {
             self.counts2[idx] += 1;
         } else {
@@ -173,7 +193,7 @@ impl Counter {
         debug_assert!(self.code1_index.is_set(code2 as usize));
         debug_assert!(self.pair_index[code1 as usize].is_set(code2 as usize));
 
-        let idx = (code1 as usize) * 511 + (code2 as usize);
+        let idx = (code1 as usize) * 512 + (code2 as usize);
         self.counts2[idx]
     }
 
@@ -339,6 +359,29 @@ impl Compressor {
 }
 
 impl Compressor {
+    // Find the longest symbol using the hash table and the codes_towbyte vector.
+    fn find_longest_symbol(&self, word: u64) -> CodeMeta {
+        // Probe the hash table first
+        let entry = self.lossy_pht.lookup(word);
+
+        // Now, downshift the `word` and the `entry` to see if they align.
+        let ignored_bits = entry.ignored_bits;
+
+        if entry.is_unused() || !compare_masked(word, entry.symbol.as_u64(), ignored_bits) {
+            // lookup the appropriate code for the twobyte sequence and write it
+            // This will hold either 511, OR it will hold the actual code.
+            let twobyte = self.get_twobyte(word as u16);
+
+            if twobyte.code() == ESCAPE_CODE {
+                CodeMeta::new(word as u8, true, 1)
+            } else {
+                twobyte
+            }
+        } else {
+            entry.code
+        }
+    }
+
     /// Compress the text using the current symbol table. Count the code occurrences
     /// and code-pair occurrences to allow us to calculate apparent gain.
     ///
@@ -349,54 +392,36 @@ impl Compressor {
             return;
         }
 
-        // Output space.
-        let mut out_buf = [0u8, 0u8];
-
         let mut in_ptr = sample.as_ptr();
-        let out_ptr = out_buf.as_mut_ptr();
 
         // SAFETY: `end` will point just after the end of the `plaintext` slice.
         let in_end = unsafe { in_ptr.byte_add(sample.len()) };
         let in_end_sub8 = in_end as usize - 8;
 
-        let mut prev_code: u16 = MAX_CODE;
+        let mut prev_code: u16 = FSST_CODE_MAX;
 
-        while (in_ptr as usize) < in_end_sub8 {
-            // SAFETY: pointer ranges are checked in the loop condition
-            unsafe {
-                // Load a full 8-byte word of data from in_ptr.
-                // SAFETY: caller asserts in_ptr is not null. we may read past end of pointer though.
-                let word: u64 = std::ptr::read_unaligned(in_ptr as *const u64);
-                let (advance_in, advance_out) = self.compress_word(word, out_ptr);
-                match advance_out {
-                    1 => {
-                        // Record a true symbol
-                        let code_u16 = out_ptr.read() as u16 + 256u16;
-                        counter.record_count1(code_u16);
-                        if prev_code != MAX_CODE {
-                            counter.record_count2(prev_code, code_u16);
-                            // Also record the first byte of the next code
-                            let first_byte_code =
-                                self.symbols[code_u16 as usize].first_byte() as u16;
-                            counter.record_count1(first_byte_code);
-                            counter.record_count2(prev_code, first_byte_code);
-                        }
-                        prev_code = code_u16;
-                    }
-                    2 => {
-                        // Record an escape.
-                        let escape_code = out_ptr.byte_offset(1).read() as u16;
-                        counter.record_count1(escape_code);
-                        if prev_code != MAX_CODE {
-                            counter.record_count2(prev_code, escape_code);
-                        }
-                        prev_code = escape_code;
-                    }
-                    _ => unreachable!("advance_out will only be 1 or 2 bytes"),
-                }
+        while (in_ptr as usize) < (in_end_sub8) {
+            // SAFETY: ensured in-bounds by loop condition.
+            let word: u64 = unsafe { std::ptr::read_unaligned(in_ptr as *const u64) };
+            let code = self.find_longest_symbol(word);
+            let code_u16 = code.extended_code();
 
-                in_ptr = in_ptr.byte_add(advance_in);
-            };
+            // Record the single and pair counts
+            counter.record_count1(code_u16);
+            counter.record_count2(prev_code, code_u16);
+
+            // Also record the count for just extending by a single byte, but only if
+            // the symbol is not itself a single byte.
+            if code.len() > 1 {
+                let code_first_byte = self.symbols[code_u16 as usize].first_byte() as u16;
+                counter.record_count1(code_first_byte);
+                counter.record_count2(prev_code, code_first_byte);
+            }
+
+            // SAFETY: pointer bound is checked in loop condition before any access is made.
+            in_ptr = unsafe { in_ptr.byte_add(code.len() as usize) };
+
+            prev_code = code_u16;
         }
 
         let remaining_bytes = unsafe { in_end.byte_offset_from(in_ptr) };
@@ -424,38 +449,31 @@ impl Compressor {
             }
         };
 
-        while in_ptr < in_end {
-            unsafe {
-                // Load a full 8-byte word of data from in_ptr.
-                // SAFETY: caller asserts in_ptr is not null. we may read past end of pointer though.
-                let (advance_in, advance_out) = self.compress_word(last_word, out_ptr);
+        let mut remaining_bytes = remaining_bytes;
 
-                match advance_out {
-                    1 => {
-                        // Record a true symbol
-                        let code_u16 = out_buf[0] as u16 + 256u16;
-                        counter.record_count1(code_u16);
-                        if prev_code != MAX_CODE {
-                            counter.record_count2(prev_code, code_u16);
-                        }
-                        prev_code = code_u16;
-                    }
-                    2 => {
-                        // Record an escape.
-                        let escape_code = out_buf[1] as u16;
-                        counter.record_count1(escape_code);
-                        if prev_code != MAX_CODE {
-                            counter.record_count2(prev_code, escape_code);
-                        }
-                        prev_code = escape_code;
-                    }
-                    _ => unreachable!("advance_out will only be 1 or 2 bytes"),
-                }
+        while remaining_bytes > 0 {
+            // SAFETY: ensured in-bounds by loop condition.
+            let code = self.find_longest_symbol(last_word);
+            let code_u16 = code.extended_code();
 
-                in_ptr = in_ptr.byte_add(advance_in);
+            // Record the single and pair counts
+            counter.record_count1(code_u16);
+            counter.record_count2(prev_code, code_u16);
 
-                last_word = advance_8byte_word(last_word, advance_in);
+            // Also record the count for just extending by a single byte, but only if
+            // the symbol is not itself a single byte.
+            if code.len() > 1 {
+                let code_first_byte = self.symbols[code_u16 as usize].first_byte() as u16;
+                counter.record_count1(code_first_byte);
+                counter.record_count2(prev_code, code_first_byte);
             }
+
+            // Advance our last_word "input pointer" by shifting off the covered values.
+            let advance = code.len() as usize;
+            remaining_bytes -= advance;
+            last_word = advance_8byte_word(last_word, advance);
+
+            prev_code = code_u16;
         }
     }
 
@@ -468,12 +486,13 @@ impl Compressor {
             let symbol1 = self.symbols[code1 as usize];
             let symbol1_len = symbol1.len();
             let count = counters.count1(code1);
+            // println!("code1 = {code1} count = {count}");
 
             // From the c++ impl:
             // "improves both compression speed (less candidates), but also quality!!"
-            // if count < (5 * sample_frac / 128) {
-            //     continue;
-            // }
+            if count < (5 * sample_frac / 128) {
+                continue;
+            }
 
             let mut gain = count * symbol1_len;
             // NOTE: use heuristic from C++ implementation to boost the gain of single-byte symbols.
@@ -503,6 +522,11 @@ impl Compressor {
                 }
                 let new_symbol = symbol1.concat(symbol2);
                 let gain = counters.count2(code1, code2) * new_symbol.len();
+                // println!(
+                //     "code1 = {code1} code2 = {code2} count = {} gain = {gain}",
+                //     counters.count2(code1, code2)
+                // );
+
                 if gain > 0 {
                     pqueue.push(Candidate {
                         symbol: new_symbol,
@@ -651,7 +675,7 @@ mod test {
         }
         assert_eq!(
             map.codes().collect::<Vec<_>>(),
-            (0u16..512u16).collect::<Vec<_>>()
+            (0u16..511u16).collect::<Vec<_>>()
         );
     }
 

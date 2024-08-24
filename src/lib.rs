@@ -111,7 +111,7 @@ impl Debug for Symbol {
 
         let slice = &self.0.to_le_bytes()[0..self.len()];
         for c in slice.iter().map(|c| *c as char) {
-            if c >= '!' && c <= '~' {
+            if ('!'..='~').contains(&c) {
                 write!(f, "{c}")?;
             } else if c == '\n' {
                 write!(f, " \\n ")?;
@@ -120,7 +120,7 @@ impl Debug for Symbol {
             } else if c == ' ' {
                 write!(f, " SPACE ")?;
             } else {
-                write!(f, "{c:X?}")?
+                write!(f, " 0x{:X?} ", c as u8)?
             }
         }
 
@@ -155,14 +155,17 @@ pub const ESCAPE_CODE: u8 = 255;
 /// Maximum value for the extended code range.
 ///
 /// When truncated to u8 this is code 255, which is equivalent to [`ESCAPE_CODE`].
-pub const MAX_CODE: u16 = 511;
+pub const FSST_CODE_MAX: u16 = 511;
+
+/// First code in the symbol table that corresponds to a non-escape symbol.
+pub const FSST_CODE_BASE: u16 = 256;
 
 #[allow(clippy::len_without_is_empty)]
 impl CodeMeta {
-    const EMPTY: Self = CodeMeta(MAX_CODE);
+    const EMPTY: Self = CodeMeta(FSST_CODE_MAX);
 
     fn new(code: u8, escape: bool, len: u16) -> Self {
-        let value = (len << 12) | ((escape as u16) << 8) | (code as u16);
+        let value = (len << 12) | ((!escape as u16) << 8) | (code as u16);
         Self(value)
     }
 
@@ -219,7 +222,7 @@ impl<'a> Decompressor<'a> {
     /// If the provided symbol table has length greater than [`MAX_CODE`].
     pub fn new(symbols: &'a [Symbol]) -> Self {
         assert!(
-            symbols.len() <= MAX_CODE as usize,
+            symbols.len() <= FSST_CODE_MAX as usize,
             "symbol table cannot have size exceeding MAX_CODE"
         );
 
@@ -397,7 +400,6 @@ impl Compressor {
     /// `out_ptr` must never be NULL or otherwise point to invalid memory.
     #[inline]
     pub unsafe fn compress_word(&self, word: u64, out_ptr: *mut u8) -> (usize, usize) {
-        println!("fast path");
         // Speculatively write the first byte of `word` at offset 1. This is necessary if it is an escape, and
         // if it isn't, it will be overwritten anyway.
         //
@@ -411,7 +413,7 @@ impl Compressor {
         // Now, downshift the `word` and the `entry` to see if they align.
         let ignored_bits = entry.ignored_bits;
 
-        if !compare_masked(word, entry.symbol.as_u64(), ignored_bits) || entry.is_unused() {
+        if entry.is_unused() || !compare_masked(word, entry.symbol.as_u64(), ignored_bits) {
             // lookup the appropriate code for the twobyte sequence and write it
             // This will hold either 511, OR it will hold the actual code.
             let code = self.get_twobyte(word as u16);
@@ -450,14 +452,13 @@ impl Compressor {
         res
     }
 
-    /// Use the symbol table to compress the plaintext into a sequence of codes and escapes.
-    pub fn compress(&self, plaintext: &[u8]) -> Vec<u8> {
-        if plaintext.is_empty() {
-            return Vec::new();
-        }
-
-        let mut values: Vec<u8> = Vec::with_capacity(2 * plaintext.len());
-
+    /// Compress into the target buffer.
+    ///
+    /// # Safety
+    ///
+    /// It is up to the caller to ensure the provided buffer is large enough to hold
+    /// all compressed text.
+    pub unsafe fn compress_into(&self, plaintext: &[u8], values: &mut Vec<u8>) {
         let mut in_ptr = plaintext.as_ptr();
         let mut out_ptr = values.as_mut_ptr();
 
@@ -505,7 +506,6 @@ impl Compressor {
         };
 
         while in_ptr < in_end && out_ptr < out_end {
-            // println!("slow path");
             unsafe {
                 // Load a full 8-byte word of data from in_ptr.
                 // SAFETY: caller asserts in_ptr is not null. we may read past end of pointer though.
@@ -531,8 +531,20 @@ impl Compressor {
 
             values.set_len(bytes_written as usize);
         }
+    }
 
-        values
+    /// Use the symbol table to compress the plaintext into a sequence of codes and escapes.
+    pub fn compress(&self, plaintext: &[u8]) -> Vec<u8> {
+        if plaintext.is_empty() {
+            return Vec::new();
+        }
+
+        let mut buffer = Vec::with_capacity(plaintext.len() * 2);
+
+        // SAFETY: the largest compressed size would be all escapes == 2*plaintext_len
+        unsafe { self.compress_into(plaintext, &mut buffer) };
+
+        buffer
     }
 
     /// Access the decompressor that can be used to decompress strings emitted from this
@@ -565,12 +577,7 @@ pub(crate) fn advance_8byte_word(word: u64, bytes: usize) -> u64 {
 
 #[inline]
 pub(crate) fn compare_masked(left: u64, right: u64, ignored_bits: u16) -> bool {
-    let mask = if ignored_bits == 64 {
-        0
-    } else {
-        u64::MAX >> ignored_bits
-    };
-
+    let mask = u64::MAX >> ignored_bits;
     (left & mask) == right
 }
 

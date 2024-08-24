@@ -56,6 +56,7 @@ fn download_dataset(url: &str, path: impl AsRef<Path>) -> Result<(), Box<dyn Err
     Ok(())
 }
 
+#[allow(clippy::use_debug)]
 fn bench_dbtext(c: &mut Criterion) {
     fn run_dataset_bench(name: &str, url: &str, path: &str, c: &mut Criterion) {
         let mut group = c.benchmark_group(name);
@@ -100,9 +101,9 @@ fn bench_dbtext(c: &mut Criterion) {
 
         let compressed = compressor.compress_bulk(&vec![&buf]);
         let compressed_size = compressed.iter().map(|l| l.len()).sum::<usize>();
-        let ratio = 100.0 * (compressed_size as f64) / (uncompressed_size as f64);
+        let cf = (uncompressed_size as f64) / (compressed_size as f64);
         println!(
-            "compressed {name} {uncompressed_size} => {compressed_size}B ({ratio}% of original)"
+            "compressed {name} {uncompressed_size} => {compressed_size}B (compression factor {cf:.2}:1)"
         )
     }
 
@@ -117,13 +118,6 @@ fn bench_dbtext(c: &mut Criterion) {
         "dbtext/l_comment",
         "https://raw.githubusercontent.com/cwida/fsst/4e188a/paper/dbtext/l_comment",
         "benches/data/l_comment",
-        c,
-    );
-
-    run_dataset_bench(
-        "dbtext/urls",
-        "https://raw.githubusercontent.com/cwida/fsst/4e188a/paper/dbtext/urls",
-        "benches/data/urls",
         c,
     );
 

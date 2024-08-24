@@ -39,7 +39,7 @@ name = "compress"
 harness = false
 
 [[bench]]
-name = "toy"
+name = "micro"
 harness = false
 
 [[test]]

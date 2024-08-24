@@ -3,7 +3,7 @@ use std::fmt::Debug;
 use crate::builder::fsst_hash;
 use crate::CodeMeta;
 use crate::Symbol;
-use crate::MAX_CODE;
+use crate::FSST_CODE_MAX;
 
 /// Size of the perfect hash table.
 ///
@@ -37,7 +37,7 @@ assert_sizeof!(TableEntry => 16);
 impl TableEntry {
     pub(crate) fn is_unused(&self) -> bool {
         // 511 should never come up for real, so use as the sentinel for an unused slot
-        self.code.extended_code() == MAX_CODE
+        self.code.extended_code() == FSST_CODE_MAX
     }
 }
 
@@ -106,7 +106,7 @@ impl LossyPHT {
         let prefix_3bytes = word & 0xFF_FF_FF;
         let slot = fsst_hash(prefix_3bytes) as usize & (HASH_TABLE_SIZE - 1);
 
-        // SAFETY: the slot is guaranteed to between 0...(HASH_TABLE_SIZE - 1).
+        // SAFETY: the slot is guaranteed to between [0, HASH_TABLE_SIZE).
         unsafe { self.slots.get_unchecked(slot) }
     }
 }
