@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./logo.webp" height="400">
+  <img src="./logo.webp" height="300">
 </p>
 
 ![Crates.io Version](https://img.shields.io/crates/v/fsst_rs)
