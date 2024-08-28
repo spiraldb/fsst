@@ -1,4 +1,6 @@
-<img src="./logo.webp" height="400">
+<p align="center">
+  <img src="./logo.webp" height="400">
+</p>
 
 ![Crates.io Version](https://img.shields.io/crates/v/fsst_rs)
 ![docs.rs](https://img.shields.io/docsrs/fsst-rs)
