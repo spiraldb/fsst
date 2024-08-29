@@ -63,41 +63,30 @@ fn bench_dbtext(c: &mut Criterion) {
         download_dataset(url, path).unwrap();
 
         let mut buf = Vec::new();
-        let mut file = File::open(path).unwrap();
-        file.read_to_end(&mut buf).unwrap();
+        {
+            let mut file = File::open(path).unwrap();
+            file.read_to_end(&mut buf).unwrap();
+        }
 
         group.bench_function("train-and-compress", |b| {
-            b.iter(|| {
+            b.iter_with_large_drop(|| {
                 let compressor = Compressor::train(&vec![&buf]);
-                let _ = std::hint::black_box(
-                    compressor.compress_bulk(std::hint::black_box(&vec![&buf])),
-                );
+                compressor.compress_bulk(std::hint::black_box(&vec![&buf]))
             });
         });
 
         let compressor = Compressor::train(&vec![&buf]);
+        let mut buffer = Vec::with_capacity(200 * 1024 * 1024);
         group.throughput(Throughput::Bytes(buf.len() as u64));
         group.bench_function("compress-only", |b| {
-            b.iter(|| {
-                let _ = std::hint::black_box(
-                    compressor.compress_bulk(std::hint::black_box(&vec![&buf])),
-                );
-            });
+            b.iter(|| unsafe { compressor.compress_into(&buf, &mut buffer) });
         });
 
         group.finish();
 
         // Report the compression factor for this dataset.
-        // let uncompressed_size = lines.iter().map(|l| l.len()).sum::<usize>();
         let uncompressed_size = buf.len();
         let compressor = Compressor::train(&vec![&buf]);
-
-        // Show the symbols
-        for code in 256..compressor.symbol_table().len() {
-            let symbol = compressor.symbol_table()[code];
-            let code = code - 256;
-            println!("symbol[{code}] = {symbol:?}");
-        }
 
         let compressed = compressor.compress_bulk(&vec![&buf]);
         let compressed_size = compressed.iter().map(|l| l.len()).sum::<usize>();

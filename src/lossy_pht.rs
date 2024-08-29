@@ -1,16 +1,19 @@
+// TODO: remove
+#![allow(unused)]
+
 use std::fmt::Debug;
 
 use crate::builder::fsst_hash;
-use crate::CodeMeta;
+use crate::ExtendedCode;
 use crate::Symbol;
-use crate::FSST_CODE_MAX;
+use crate::FSST_CODE_MASK;
 
 /// Size of the perfect hash table.
 ///
 /// NOTE: this differs from the paper, which recommends a 64KB total
 /// table size. The paper does not account for the fact that most
 /// vendors split the L1 cache into 32KB of instruction and 32KB of data.
-pub const HASH_TABLE_SIZE: usize = 1 << 11;
+pub const HASH_TABLE_SIZE: usize = 1 << 12;
 
 /// A single entry in the [Lossy Perfect Hash Table][`LossyPHT`].
 ///
@@ -23,7 +26,7 @@ pub(crate) struct TableEntry {
     pub(crate) symbol: Symbol,
 
     /// Code and associated metadata for the symbol
-    pub(crate) code: CodeMeta,
+    pub(crate) code: ExtendedCode,
 
     /// Number of ignored bits in `symbol`.
     ///
@@ -36,8 +39,7 @@ assert_sizeof!(TableEntry => 16);
 
 impl TableEntry {
     pub(crate) fn is_unused(&self) -> bool {
-        // 511 should never come up for real, so use as the sentinel for an unused slot
-        self.code.extended_code() == FSST_CODE_MAX
+        self.code == ExtendedCode::UNUSED
     }
 }
 
@@ -64,7 +66,7 @@ impl LossyPHT {
         let slots = vec![
             TableEntry {
                 symbol: Symbol::ZERO,
-                code: CodeMeta::EMPTY,
+                code: ExtendedCode::UNUSED,
                 ignored_bits: 64,
             };
             HASH_TABLE_SIZE
@@ -88,7 +90,7 @@ impl LossyPHT {
             false
         } else {
             entry.symbol = symbol;
-            entry.code = CodeMeta::new_symbol(code, symbol);
+            entry.code = ExtendedCode::new_symbol(code, symbol);
             entry.ignored_bits = (64 - 8 * symbol.len()) as u16;
             true
         }
@@ -98,7 +100,7 @@ impl LossyPHT {
     pub(crate) fn remove(&mut self, symbol: Symbol) {
         let prefix_3bytes = symbol.as_u64() & 0xFF_FF_FF;
         let slot = fsst_hash(prefix_3bytes) as usize & (HASH_TABLE_SIZE - 1);
-        self.slots[slot].code = CodeMeta::EMPTY;
+        self.slots[slot].code = ExtendedCode::UNUSED;
     }
 
     #[inline]

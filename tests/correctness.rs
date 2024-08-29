@@ -1,6 +1,6 @@
 #![cfg(test)]
 
-use fsst::{Compressor, Symbol};
+use fsst::{Compressor, CompressorBuilder, Symbol};
 
 static PREAMBLE: &str = r#"
 When in the Course of human events, it becomes necessary for one people to dissolve
@@ -35,8 +35,10 @@ fn test_train_on_empty() {
 
 #[test]
 fn test_one_byte() {
-    let mut empty = Compressor::default();
-    empty.insert(Symbol::from_u8(0x01));
+    let mut empty = CompressorBuilder::new();
+    empty.insert(Symbol::from_u8(0x01), 1);
+
+    let empty = empty.build();
 
     let compressed = empty.compress(&[0x01]);
     assert_eq!(compressed, vec![0u8]);
@@ -82,8 +84,9 @@ fn test_chinese() {
 // DELETE THIS
 #[test]
 fn test_codepath() {
-    let mut compressor = Compressor::default();
-    compressor.insert(Symbol::from_slice(&[b'a', b'b', b'c', b'd', 0, 0, 0, 0]));
+    let mut compressor = CompressorBuilder::new();
+    compressor.insert(Symbol::from_slice(&[b'a', b'b', b'c', b'd', 0, 0, 0, 0]), 4);
+    let compressor = compressor.build();
 
     let output = std::hint::black_box(compressor.compress(b"abcd"));
     assert_eq!(output.len(), 1);
