@@ -384,6 +384,7 @@ impl CompressorBuilder {
     ///
     /// Returns the `suffix_lim`, which is the index of the two-byte code before where we know
     /// there are no longer suffixies in the symbol table.
+    #[inline(never)]
     fn finalize(&mut self) -> u8 {
         // Create a cumulative sum of each of the elements of the input line numbers.
         // Do a map that includes the previously seen value as well.
@@ -622,13 +623,13 @@ impl Compressor {
 }
 
 impl CompressorBuilder {
-    // Find the longest symbol using the hash table and the `codes_two_byte` vector.
+    /// Find the longest symbol using the hash table and the codes_one_byte and codes_two_byte indexes.
     fn find_longest_symbol(&self, word: u64) -> Code {
         // Probe the hash table first to see if we have a long match
         let entry = self.lossy_pht.lookup(word);
         let ignored_bits = entry.ignored_bits;
 
-        // If the entry is valid, return it
+        // If the entry is valid, return the code
         if !entry.is_unused() && compare_masked(word, entry.symbol.as_u64(), ignored_bits) {
             return entry.code;
         }
@@ -772,12 +773,10 @@ impl CompressorBuilder {
                 gain *= 8;
             }
 
-            // if gain > 0 {
             pqueue.push(Candidate {
                 symbol: symbol1,
                 gain,
             });
-            // }
 
             // Skip merges on last round, or when symbol cannot be extended.
             if sample_frac >= 128 || symbol1_len == 8 {
@@ -794,12 +793,10 @@ impl CompressorBuilder {
                 let new_symbol = symbol1.concat(symbol2);
                 let gain = counters.count2(code1, code2) * new_symbol.len();
 
-                // if gain > 0 {
                 pqueue.push(Candidate {
                     symbol: new_symbol,
                     gain,
                 })
-                // }
             }
         }
 
