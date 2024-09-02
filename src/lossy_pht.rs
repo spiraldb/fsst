@@ -4,9 +4,9 @@
 use std::fmt::Debug;
 
 use crate::builder::fsst_hash;
-use crate::ExtendedCode;
 use crate::Symbol;
 use crate::FSST_CODE_MASK;
+use crate::{Code, FSST_CODE_UNUSED};
 
 /// Size of the perfect hash table.
 ///
@@ -26,7 +26,7 @@ pub(crate) struct TableEntry {
     pub(crate) symbol: Symbol,
 
     /// Code and associated metadata for the symbol
-    pub(crate) code: ExtendedCode,
+    pub(crate) code: Code,
 
     /// Number of ignored bits in `symbol`.
     ///
@@ -39,7 +39,7 @@ assert_sizeof!(TableEntry => 16);
 
 impl TableEntry {
     pub(crate) fn is_unused(&self) -> bool {
-        self.code == ExtendedCode::UNUSED
+        self.code == Code::UNUSED
     }
 }
 
@@ -66,7 +66,7 @@ impl LossyPHT {
         let slots = vec![
             TableEntry {
                 symbol: Symbol::ZERO,
-                code: ExtendedCode::UNUSED,
+                code: Code::UNUSED,
                 ignored_bits: 64,
             };
             HASH_TABLE_SIZE
@@ -82,7 +82,7 @@ impl LossyPHT {
     /// # Returns
     ///
     /// True if the symbol was inserted into the table, false if it was rejected due to collision.
-    pub(crate) fn insert(&mut self, symbol: Symbol, code: u8) -> bool {
+    pub(crate) fn insert(&mut self, symbol: Symbol, len: usize, code: u8) -> bool {
         let prefix_3bytes = symbol.as_u64() & 0xFF_FF_FF;
         let slot = fsst_hash(prefix_3bytes) as usize & (HASH_TABLE_SIZE - 1);
         let entry = &mut self.slots[slot];
@@ -90,9 +90,21 @@ impl LossyPHT {
             false
         } else {
             entry.symbol = symbol;
-            entry.code = ExtendedCode::new_symbol(code, symbol);
+            entry.code = Code::new_symbol_building(code, len);
             entry.ignored_bits = (64 - 8 * symbol.len()) as u16;
             true
+        }
+    }
+
+    /// Given a new code mapping, rewrite the codes into the new code range.
+    pub(crate) fn renumber(&mut self, new_codes: &[u8]) {
+        for slot in self.slots.iter_mut() {
+            if slot.code != Code::UNUSED {
+                let old_code = slot.code.code();
+                let new_code = new_codes[old_code as usize];
+                let len = slot.code.len();
+                slot.code = Code::new_symbol(new_code, len as usize);
+            }
         }
     }
 
@@ -100,7 +112,7 @@ impl LossyPHT {
     pub(crate) fn remove(&mut self, symbol: Symbol) {
         let prefix_3bytes = symbol.as_u64() & 0xFF_FF_FF;
         let slot = fsst_hash(prefix_3bytes) as usize & (HASH_TABLE_SIZE - 1);
-        self.slots[slot].code = ExtendedCode::UNUSED;
+        self.slots[slot].code = Code::UNUSED;
     }
 
     #[inline]

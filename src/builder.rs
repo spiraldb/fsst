@@ -8,8 +8,8 @@ use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
 use crate::{
-    advance_8byte_word, compare_masked, extract_u64, lossy_pht::LossyPHT, Compressor, ExtendedCode,
-    Symbol, FSST_CODE_BASE, FSST_CODE_MASK,
+    advance_8byte_word, compare_masked, extract_u64, lossy_pht::LossyPHT, Code, Compressor, Symbol,
+    FSST_CODE_BASE, FSST_CODE_MASK,
 };
 
 /// Bitmap that only works for values up to 512
@@ -233,13 +233,18 @@ pub struct CompressorBuilder {
     /// the escape values.
     n_symbols: u8,
 
-    /// Inverted index mapping 2-byte symbols to codes
-    codes_two_byte: Vec<ExtendedCode>,
+    /// Counts for number of symbols of each length.
+    ///
+    /// `len_histogram[len-1]` = count of the symbols of length `len`.
+    len_histogram: [u8; 8],
 
     /// Inverted index mapping 1-byte symbols to codes.
     ///
     /// This is only used for building, not used by the final `Compressor`.
-    codes_one_byte: Vec<ExtendedCode>,
+    codes_one_byte: Vec<Code>,
+
+    /// Inverted index mapping 2-byte symbols to codes
+    codes_two_byte: Vec<Code>,
 
     /// Lossy perfect hash table for looking up codes to symbols that are 3 bytes or more
     lossy_pht: LossyPHT,
@@ -259,6 +264,7 @@ impl CompressorBuilder {
         let mut table = Self {
             symbols,
             n_symbols: 0,
+            len_histogram: [0; 8],
             codes_two_byte: Vec::with_capacity(65_536),
             codes_one_byte: Vec::with_capacity(512),
             lossy_pht: LossyPHT::new(),
@@ -273,13 +279,13 @@ impl CompressorBuilder {
         // Fill codes_one_byte with pseudocodes for each byte.
         for byte in 0..=255 {
             // Push pseudocode for single-byte escape.
-            table.codes_one_byte.push(ExtendedCode::new_escape(byte));
+            table.codes_one_byte.push(Code::new_escape(byte));
         }
 
         // Fill codes_two_byte with pseudocode of first byte
         for byte1 in 0..=255 {
             for _byte2 in 0..=255 {
-                table.codes_two_byte.push(ExtendedCode::new_escape(byte1));
+                table.codes_two_byte.push(Code::new_escape(byte1));
             }
         }
 
@@ -310,18 +316,21 @@ impl CompressorBuilder {
 
         if len == 2 {
             // shortCodes
-            self.codes_two_byte[symbol.first_two_bytes() as usize] =
-                ExtendedCode::new_symbol(self.n_symbols, symbol);
+            self.codes_two_byte[symbol.first2() as usize] =
+                Code::new_symbol_building(self.n_symbols, 2);
         } else if len == 1 {
             // byteCodes
             self.codes_one_byte[symbol.first_byte() as usize] =
-                ExtendedCode::new_symbol(self.n_symbols, symbol);
+                Code::new_symbol_building(self.n_symbols, 1);
         } else {
             // Symbols of 3 or more bytes go into the hash table
-            if !self.lossy_pht.insert(symbol, self.n_symbols) {
+            if !self.lossy_pht.insert(symbol, len, self.n_symbols) {
                 return false;
             }
         }
+
+        // Increment length histogram.
+        self.len_histogram[len - 1] += 1;
 
         // Insert successfully stored symbol at end of the symbol table
         // Note the rescaling from range [0-254] -> [256, 510].
@@ -335,21 +344,26 @@ impl CompressorBuilder {
     /// This is considerably faster than building a new Compressor from scratch for each
     /// iteration of the `train` loop.
     fn clear(&mut self) {
-        // Drop all of the byte codes
-        for i in 0..=255 {
-            self.codes_one_byte[i] = ExtendedCode::UNUSED;
-        }
-
         // Eliminate every observed code from the table.
         for code in 0..(256 + self.n_symbols as usize) {
             let symbol = self.symbols[code];
-            if symbol.len() <= 2 {
-                // Clear the codes_twobyte array
-                self.codes_two_byte[symbol.first_two_bytes() as usize] = ExtendedCode::UNUSED;
+            if symbol.len() == 1 {
+                // Reset the entry from the codes_one_byte array.
+                self.codes_one_byte[symbol.first_byte() as usize] =
+                    Code::new_escape(symbol.first_byte());
+            } else if symbol.len() == 2 {
+                // Reset the entry from the codes_two_byte array.
+                self.codes_two_byte[symbol.first2() as usize] =
+                    Code::new_escape(symbol.first_byte());
             } else {
-                // Clear the hashtable
+                // Clear the hashtable entry
                 self.lossy_pht.remove(symbol);
             }
+        }
+
+        // Reset len histogram
+        for i in 0..=7 {
+            self.len_histogram[i] = 0;
         }
 
         self.n_symbols = 0;
@@ -358,22 +372,120 @@ impl CompressorBuilder {
     /// Finalizing the table is done once building is complete to prepare for efficient
     /// compression.
     ///
-    /// When finalizing, all the `codes_onebyte` symbols are saved into the
-    /// `codes_twobyte` array, thus removing the need for `codes_onebyte` at compression time.
-    fn finalize(&mut self) {
+    /// When we finalize the table, the following modifications are made in-place:
+    ///
+    /// 1. The codes are renumbered so that all symbols are ordered by length (order 23456781).
+    ///    During this process, the two byte symbols are separated into a byte_lim and a suffix_lim,
+    ///    so we know that we don't need to check the suffix limitations instead.
+    /// 2. The 1-byte symbols index is merged into the 2-byte symbols index to allow for use of only
+    ///    a single index in front of the hash table.
+    ///
+    /// # Returns
+    ///
+    /// Returns the `suffix_lim`, which is the index of the two-byte code before where we know
+    /// there are no longer suffixies in the symbol table.
+    fn finalize(&mut self) -> u8 {
+        // Create a cumulative sum of each of the elements of the input line numbers.
+        // Do a map that includes the previously seen value as well.
+        // Regroup symbols based on their lengths.
+        // Space at the end of the symbol table reserved for the one-byte codes.
+        let byte_lim = self.n_symbols - self.len_histogram[0];
+
+        // Start code for each length.
+        // Length 1: at the end of symbol table.
+        // Length 2: starts at 0. Split into before/after suffixLim.
+        let mut codes_by_length = [0u8; 8];
+        codes_by_length[0] = byte_lim;
+        codes_by_length[1] = 0;
+
+        // codes for lengths 3..=8 start where the previous ones end.
+        for i in 1..7 {
+            codes_by_length[i + 1] = codes_by_length[i] + self.len_histogram[i];
+        }
+
+        // no_suffix_code is the lowest code for a symbol that does not have a longer 3+ byte
+        // suffix in the table.
+        // This value starts at 0 and extends up.
+        let mut no_suffix_code = 0;
+
+        // The codes that do not have a suffix begin just before the range of the 3-byte codes.
+        let mut has_suffix_code = codes_by_length[2];
+
+        // Assign each symbol a new code ordered by lengths, in the order
+        // 2(no suffix) | 2 (suffix) | 3 | 4 | 5 | 6 | 7 | 8 | 1
+        let mut new_codes = [0u8; FSST_CODE_BASE as usize];
+
+        let mut symbol_lens = [0u8; FSST_CODE_BASE as usize];
+
+        for i in 0..(self.n_symbols as usize) {
+            let symbol = self.symbols[256 + i];
+            let len = symbol.len();
+            if len == 2 {
+                // If this is a suffix of another longer symbol, we segment it to earlier
+                // in the table.
+                let has_suffix = self
+                    .symbols
+                    .iter()
+                    .skip(FSST_CODE_BASE as usize)
+                    .enumerate()
+                    .any(|(k, other)| i != k && symbol.first2() == other.first2());
+
+                if has_suffix {
+                    // Symbols that have a longer suffix are inserted at the end of the 2-byte range
+                    has_suffix_code -= 1;
+                    new_codes[i] = has_suffix_code;
+                } else {
+                    // Symbols that do not have a longer suffix are inserted at the start of
+                    // the 2-byte range.
+                    new_codes[i] = no_suffix_code;
+                    no_suffix_code += 1;
+                }
+            } else {
+                // Assign new code based on the next code available for the given length symbol
+                new_codes[i] = codes_by_length[len - 1];
+                codes_by_length[len - 1] += 1;
+            }
+
+            // Write the symbol into the front half of the symbol table.
+            // We are reusing the space that was previously occupied by escapes.
+            self.symbols[new_codes[i] as usize] = symbol;
+            symbol_lens[new_codes[i] as usize] = len as u8;
+        }
+
+        // Truncate the symbol table to only include the "true" symbols.
+        self.symbols.truncate(self.n_symbols as usize);
+
+        // Rewrite the codes_one_byte table to point at the new code values.
+        // Replace pseudocodes with escapes.
         for byte in 0..=255 {
             let one_byte = self.codes_one_byte[byte];
-            if one_byte.extended_code() <= FSST_CODE_BASE {
-                self.codes_one_byte[byte] = ExtendedCode::UNUSED;
+            if one_byte.extended_code() >= FSST_CODE_BASE {
+                let new_code = new_codes[one_byte.code() as usize];
+                self.codes_one_byte[byte] = Code::new_symbol(new_code, 1);
+            } else {
+                // After finalize: codes_one_byte contains the unused value
+                self.codes_one_byte[byte] = Code::UNUSED;
             }
         }
 
+        // Rewrite the codes_two_byte table to point at the new code values.
+        // Replace pseudocodes with escapes.
         for two_bytes in 0..=65_535 {
-            let code = self.codes_two_byte[two_bytes];
-            if code.extended_code() <= FSST_CODE_BASE {
-                self.codes_two_byte[two_bytes] = self.codes_one_byte[two_bytes as u8 as usize];
+            let two_byte = self.codes_two_byte[two_bytes];
+            if two_byte.extended_code() >= FSST_CODE_BASE {
+                let new_code = new_codes[two_byte.code() as usize];
+                self.codes_two_byte[two_bytes] = Code::new_symbol(new_code, 2);
+            } else {
+                // The one-byte code for the given code number here...
+                let new_code = self.codes_one_byte[two_bytes as u8 as usize];
+                self.codes_two_byte[two_bytes] = new_code;
             }
         }
+
+        // Reset values in the hash table as well.
+        self.lossy_pht.renumber(&new_codes);
+
+        has_suffix_code
     }
 
     /// Build into the final hash table.
@@ -381,11 +493,12 @@ impl CompressorBuilder {
         // finalize the symbol table by inserting the codes_twobyte values into
         // the relevant parts of the `codes_onebyte` set.
 
-        self.finalize();
+        let has_suffix_code = self.finalize();
 
         Compressor {
             symbols: self.symbols,
             n_symbols: self.n_symbols,
+            has_suffix_code,
             codes_two_byte: self.codes_two_byte,
             lossy_pht: self.lossy_pht,
         }
@@ -510,7 +623,7 @@ impl Compressor {
 
 impl CompressorBuilder {
     // Find the longest symbol using the hash table and the `codes_two_byte` vector.
-    fn find_longest_symbol(&self, word: u64) -> ExtendedCode {
+    fn find_longest_symbol(&self, word: u64) -> Code {
         // Probe the hash table first to see if we have a long match
         let entry = self.lossy_pht.lookup(word);
         let ignored_bits = entry.ignored_bits;
@@ -560,8 +673,6 @@ impl CompressorBuilder {
             gain += (code.len() as usize) - ((code_u16 < 256) as usize);
 
             // Record the single and pair counts
-            println!("COUNTER(A): record_count1({code_u16})");
-            println!("COUNTER(A): record_count2({prev_code}, {code_u16})");
             counter.record_count1(code_u16);
             counter.record_count2(prev_code, code_u16);
 
@@ -571,8 +682,6 @@ impl CompressorBuilder {
                 let code_first_byte = self.symbols[code_u16 as usize].first_byte() as u16;
                 counter.record_count1(code_first_byte);
                 counter.record_count2(prev_code, code_first_byte);
-                println!("COUNTER(B): record_count1({code_first_byte})");
-                println!("COUNTER(B): record_count2({prev_code}, {code_first_byte})");
             }
 
             // SAFETY: pointer bound is checked in loop condition before any access is made.
@@ -618,8 +727,6 @@ impl CompressorBuilder {
             gain += (code.len() as usize) - ((code_u16 < 256) as usize);
 
             // Record the single and pair counts
-            println!("COUNTER(C): record_count1({code_u16})");
-            println!("COUNTER(C): record_count2({prev_code}, {code_u16})");
             counter.record_count1(code_u16);
             counter.record_count2(prev_code, code_u16);
 
@@ -629,8 +736,6 @@ impl CompressorBuilder {
                 let code_first_byte = self.symbols[code_u16 as usize].first_byte() as u16;
                 counter.record_count1(code_first_byte);
                 counter.record_count2(prev_code, code_first_byte);
-                println!("COUNTER(D): record_count1({code_first_byte})");
-                println!("COUNTER(D): record_count2({prev_code}, {code_first_byte})");
             }
 
             // Advance our last_word "input pointer" by shifting off the covered values.
@@ -667,7 +772,6 @@ impl CompressorBuilder {
                 gain *= 8;
             }
 
-            println!("(outer) pushing candidate {symbol1:?}");
             // if gain > 0 {
             pqueue.push(Candidate {
                 symbol: symbol1,
@@ -689,12 +793,6 @@ impl CompressorBuilder {
                 }
                 let new_symbol = symbol1.concat(symbol2);
                 let gain = counters.count2(code1, code2) * new_symbol.len();
-                // println!(
-                //     "code1 = {code1} code2 = {code2} count = {} gain = {gain}",
-                //     counters.count2(code1, code2)
-                // );
-
-                println!("(inner) pushing candidate {symbol2:?}");
 
                 // if gain > 0 {
                 pqueue.push(Candidate {
@@ -710,14 +808,12 @@ impl CompressorBuilder {
 
         // Pop the 255 best symbols.
         let mut n_symbols = 0;
-        println!("BEGIN pq sampleFrac={sample_frac}");
         while !pqueue.is_empty() && n_symbols < 255 {
             let candidate = pqueue.pop().unwrap();
             if self.insert(candidate.symbol, candidate.symbol.len()) {
                 n_symbols += 1;
             }
         }
-        println!("END pq sampleFrac={sample_frac}");
     }
 }
 
@@ -766,52 +862,38 @@ mod test {
     #[test]
     fn test_builder() {
         // Train a Compressor on the toy string
-        let text = b"hello hello hello hello";
+        let text = b"hello hello hello hello hello";
 
         // count of 5 is the cutoff for including a symbol in the table.
         let table = Compressor::train(&vec![text, text, text, text, text]);
 
-        println!("BEGIN symbols");
-        for symbol in table.symbol_table() {
-            println!("{symbol:?}");
-        }
-        println!("END symbols");
-
         // Use the table to compress a string, see the values
         let compressed = table.compress(text);
-
-        println!("compressed = {compressed:?}");
 
         // Ensure that the compressed string has no escape bytes
         assert!(compressed.iter().all(|b| *b != ESCAPE_CODE));
 
-        println!("test2");
-
         // Ensure that we can compress a string with no values seen at training time, with escape bytes
         let compressed = table.compress("xyz123".as_bytes());
-        println!("xyz123 -> {compressed:?}");
         let decompressed = table.decompressor().decompress(&compressed);
         assert_eq!(&decompressed, b"xyz123");
-        // assert_eq!(
-        //     compressed,
-        //     vec![
-        //         ESCAPE_CODE,
-        //         b'x',
-        //         ESCAPE_CODE,
-        //         b'y',
-        //         ESCAPE_CODE,
-        //         b'z',
-        //         ESCAPE_CODE,
-        //         b'1',
-        //         ESCAPE_CODE,
-        //         b'2',
-        //         ESCAPE_CODE,
-        //         b'3',
-        //     ]
-        // );
-
-        // Will this actually work...???
-        // We might end up encoding codes that worked out this way before.
+        assert_eq!(
+            compressed,
+            vec![
+                ESCAPE_CODE,
+                b'x',
+                ESCAPE_CODE,
+                b'y',
+                ESCAPE_CODE,
+                b'z',
+                ESCAPE_CODE,
+                b'1',
+                ESCAPE_CODE,
+                b'2',
+                ESCAPE_CODE,
+                b'3',
+            ]
+        );
     }
 
     #[test]
