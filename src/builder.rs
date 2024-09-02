@@ -21,7 +21,7 @@ struct CodesBitmap {
 assert_sizeof!(CodesBitmap => 64);
 
 impl CodesBitmap {
-    /// Set the indicated bit. Must be between 0 and [`MAX_CODE`][crate::MAX_CODE].
+    /// Set the indicated bit. Must be between 0 and [`FSST_CODE_MASK`][crate::FSST_CODE_MASK].
     pub(crate) fn set(&mut self, index: usize) {
         debug_assert!(
             index <= FSST_CODE_MASK as usize,

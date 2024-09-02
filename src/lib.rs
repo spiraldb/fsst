@@ -250,11 +250,11 @@ impl<'a> Decompressor<'a> {
     ///
     /// # Panics
     ///
-    /// If the provided symbol table has length greater than [`MAX_CODE`].
+    /// If the provided symbol table has length greater than 256
     pub fn new(symbols: &'a [Symbol]) -> Self {
         assert!(
-            symbols.len() <= FSST_CODE_MASK as usize,
-            "symbol table cannot have size exceeding MAX_CODE"
+            symbols.len() <= 255,
+            "symbol table cannot have size exceeding 255"
         );
 
         Self { symbols }
