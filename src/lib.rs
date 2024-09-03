@@ -29,14 +29,7 @@ impl Symbol {
 
     /// Constructor for a `Symbol` from an 8-element byte slice.
     pub fn from_slice(slice: &[u8; 8]) -> Self {
-        let num: u64 = slice[0] as u64
-            | (slice[1] as u64) << 8
-            | (slice[2] as u64) << 16
-            | (slice[3] as u64) << 24
-            | (slice[4] as u64) << 32
-            | (slice[5] as u64) << 40
-            | (slice[6] as u64) << 48
-            | (slice[7] as u64) << 56;
+        let num: u64 = u64::from_le_bytes(*slice);
 
         Self(num)
     }
@@ -106,7 +99,7 @@ impl Symbol {
 
     /// Return a new `Symbol` by logically concatenating ourselves with another `Symbol`.
     pub fn concat(self, other: Self) -> Self {
-        debug_assert!(
+        assert!(
             self.len() + other.len() <= 8,
             "cannot build symbol with length > 8"
         );
@@ -170,9 +163,6 @@ pub const FSST_CODE_BITS: usize = 9;
 
 /// First bit of the "length" portion of an extended code.
 pub const FSST_LEN_BITS: usize = 12;
-
-/// A code that never appears in practice, indicating an unused slot.
-pub const FSST_CODE_UNUSED: u16 = 1u16 << FSST_CODE_BITS;
 
 /// Maximum code value in the extended code range.
 pub const FSST_CODE_MAX: u16 = 1 << FSST_CODE_BITS;
@@ -253,7 +243,7 @@ impl<'a> Decompressor<'a> {
     /// If the provided symbol table has length greater than 256
     pub fn new(symbols: &'a [Symbol], lengths: &'a [u8]) -> Self {
         assert!(
-            symbols.len() <= 255,
+            symbols.len() < FSST_CODE_BASE as usize,
             "symbol table cannot have size exceeding 255"
         );
 
@@ -295,7 +285,7 @@ impl<'a> Decompressor<'a> {
             }
         }
 
-        debug_assert!(
+        assert!(
             in_pos >= compressed.len(),
             "decompression should exhaust input before output"
         );
@@ -350,7 +340,7 @@ pub struct Compressor {
 /// The core structure of the FSST codec, holding a mapping between `Symbol`s and `Code`s.
 ///
 /// The symbol table is trained on a corpus of data in the form of a single byte array, building up
-/// a mapping of 1-byte "codes" to sequences of up to `N` plaintext bytse, or "symbols".
+/// a mapping of 1-byte "codes" to sequences of up to 8 plaintext bytes, or "symbols".
 impl Compressor {
     /// Using the symbol table, runs a single cycle of compression on an input word, writing
     /// the output into `out_ptr`.
@@ -367,7 +357,6 @@ impl Compressor {
     /// # Safety
     ///
     /// `out_ptr` must never be NULL or otherwise point to invalid memory.
-    #[inline(never)]
     pub unsafe fn compress_word(&self, word: u64, out_ptr: *mut u8) -> (usize, usize) {
         // Speculatively write the first byte of `word` at offset 1. This is necessary if it is an escape, and
         // if it isn't, it will be overwritten anyway.
