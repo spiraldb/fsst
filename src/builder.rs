@@ -312,7 +312,7 @@ impl CompressorBuilder {
     /// with an existing symbol.
     pub fn insert(&mut self, symbol: Symbol, len: usize) -> bool {
         assert!(self.n_symbols < 255, "cannot insert into full symbol table");
-        debug_assert!(len == symbol.len(), "provided len != symbol.len()");
+        assert_eq!(len, symbol.len(), "provided len must equal symbol.len()");
 
         if len == 2 {
             // shortCodes
@@ -533,7 +533,7 @@ const FSST_SAMPLELINE: usize = 512;
 /// SAFETY: sample_buf must be >= FSST_SAMPLEMAX bytes long. Providing something less may cause unexpected failures.
 #[allow(clippy::ptr_arg)]
 fn make_sample<'a, 'b: 'a>(sample_buf: &'a mut Vec<u8>, str_in: &Vec<&'b [u8]>) -> Vec<&'a [u8]> {
-    debug_assert!(
+    assert!(
         sample_buf.capacity() >= FSST_SAMPLEMAX,
         "sample_buf.len() < FSST_SAMPLEMAX"
     );
@@ -699,7 +699,7 @@ impl CompressorBuilder {
         }
 
         let remaining_bytes = unsafe { in_end.byte_offset_from(in_ptr) };
-        debug_assert!(
+        assert!(
             remaining_bytes.is_positive(),
             "in_ptr exceeded in_end, should not be possible"
         );

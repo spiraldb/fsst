@@ -99,7 +99,7 @@ impl Symbol {
 
     /// Return a new `Symbol` by logically concatenating ourselves with another `Symbol`.
     pub fn concat(self, other: Self) -> Self {
-        debug_assert!(
+        assert!(
             self.len() + other.len() <= 8,
             "cannot build symbol with length > 8"
         );
@@ -243,7 +243,7 @@ impl<'a> Decompressor<'a> {
     /// If the provided symbol table has length greater than 256
     pub fn new(symbols: &'a [Symbol], lengths: &'a [u8]) -> Self {
         assert!(
-            symbols.len() <= 255,
+            symbols.len() < FSST_CODE_BASE as usize,
             "symbol table cannot have size exceeding 255"
         );
 
@@ -285,7 +285,7 @@ impl<'a> Decompressor<'a> {
             }
         }
 
-        debug_assert!(
+        assert!(
             in_pos >= compressed.len(),
             "decompression should exhaust input before output"
         );
