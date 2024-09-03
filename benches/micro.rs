@@ -11,7 +11,7 @@ fn one_megabyte(seed: &[u8]) -> Vec<u8> {
 fn bench_compress(c: &mut Criterion) {
     let mut group = c.benchmark_group("compress-overhead");
     // Reusable memory to hold outputs
-    let mut output_buf: Vec<u8> = Vec::with_capacity(12);
+    let mut output_buf: Vec<u8> = Vec::with_capacity(8 * 1024 * 1024);
 
     // We create a symbol table that requires probing the hash table to perform
     // decompression.

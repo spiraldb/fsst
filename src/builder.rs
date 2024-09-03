@@ -8,7 +8,7 @@ use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
 use crate::{
-    advance_8byte_word, compare_masked, extract_u64, lossy_pht::LossyPHT, Code, Compressor, Symbol,
+    advance_8byte_word, compare_masked, lossy_pht::LossyPHT, Code, Compressor, Symbol,
     FSST_CODE_BASE, FSST_CODE_MASK,
 };
 
@@ -709,20 +709,13 @@ impl CompressorBuilder {
         // Load the last `remaining_byte`s of data into a final world. We then replicate the loop above,
         // but shift data out of this word rather than advancing an input pointer and potentially reading
         // unowned memory
-        let mut last_word = unsafe {
-            match remaining_bytes {
-                0 => 0,
-                1 => extract_u64::<1>(in_ptr),
-                2 => extract_u64::<2>(in_ptr),
-                3 => extract_u64::<3>(in_ptr),
-                4 => extract_u64::<4>(in_ptr),
-                5 => extract_u64::<5>(in_ptr),
-                6 => extract_u64::<6>(in_ptr),
-                7 => extract_u64::<7>(in_ptr),
-                8 => extract_u64::<8>(in_ptr),
-                _ => unreachable!("remaining bytes must be <= 8"),
-            }
-        };
+        let mut bytes = [0u8; 8];
+        unsafe {
+            // SAFETY: it is safe to read up to remaining_bytes from in_ptr, and remaining_bytes
+            //  will be <= 8 bytes.
+            std::ptr::copy_nonoverlapping(in_ptr, bytes.as_mut_ptr(), remaining_bytes);
+        }
+        let mut last_word = u64::from_le_bytes(bytes);
 
         let mut remaining_bytes = remaining_bytes;
 
