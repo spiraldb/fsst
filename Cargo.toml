@@ -27,7 +27,7 @@ use_debug = { level = "deny" }
 
 [dev-dependencies]
 criterion = "0.5"
-curl = "*"
+curl = "0.4"
 
 [[example]]
 name = "round_trip"
