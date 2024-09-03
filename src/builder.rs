@@ -425,8 +425,6 @@ impl CompressorBuilder {
             let symbol = self.symbols[256 + i];
             let len = symbol.len();
             if len == 2 {
-                // If this is a suffix of another longer symbol, we segment it to earlier
-                // in the table.
                 let has_suffix = self
                     .symbols
                     .iter()
