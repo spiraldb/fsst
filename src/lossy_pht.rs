@@ -1,28 +1,32 @@
+// TODO: remove
+#![allow(unused)]
+
 use std::fmt::Debug;
 
-use crate::CodeMeta;
+use crate::builder::fsst_hash;
 use crate::Symbol;
-use crate::MAX_CODE;
+use crate::FSST_CODE_MASK;
+use crate::{Code, FSST_CODE_UNUSED};
 
 /// Size of the perfect hash table.
 ///
 /// NOTE: this differs from the paper, which recommends a 64KB total
 /// table size. The paper does not account for the fact that most
 /// vendors split the L1 cache into 32KB of instruction and 32KB of data.
-pub const HASH_TABLE_SIZE: usize = 1 << 11;
+pub const HASH_TABLE_SIZE: usize = 1 << 12;
 
 /// A single entry in the [Lossy Perfect Hash Table][`LossyPHT`].
 ///
 /// `TableEntry` is based on the `Symbol` class outlined in Algorithm 4 of the FSST paper. See
 /// the module documentation for a link to the paper.
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Debug)]
 #[repr(C)]
 pub(crate) struct TableEntry {
     /// Symbol, piece of a string, 8 bytes or fewer.
     pub(crate) symbol: Symbol,
 
     /// Code and associated metadata for the symbol
-    pub(crate) code: CodeMeta,
+    pub(crate) code: Code,
 
     /// Number of ignored bits in `symbol`.
     ///
@@ -35,8 +39,7 @@ assert_sizeof!(TableEntry => 16);
 
 impl TableEntry {
     pub(crate) fn is_unused(&self) -> bool {
-        // 511 should never come up for real, so use as the sentinel for an unused slot
-        self.code.extended_code() == MAX_CODE
+        self.code == Code::UNUSED
     }
 }
 
@@ -63,7 +66,7 @@ impl LossyPHT {
         let slots = vec![
             TableEntry {
                 symbol: Symbol::ZERO,
-                code: CodeMeta::EMPTY,
+                code: Code::UNUSED,
                 ignored_bits: 64,
             };
             HASH_TABLE_SIZE
@@ -79,43 +82,46 @@ impl LossyPHT {
     /// # Returns
     ///
     /// True if the symbol was inserted into the table, false if it was rejected due to collision.
-    pub(crate) fn insert(&mut self, symbol: Symbol, code: u8) -> bool {
+    pub(crate) fn insert(&mut self, symbol: Symbol, len: usize, code: u8) -> bool {
         let prefix_3bytes = symbol.as_u64() & 0xFF_FF_FF;
-        let slot = self.hash(prefix_3bytes) as usize & (HASH_TABLE_SIZE - 1);
+        let slot = fsst_hash(prefix_3bytes) as usize & (HASH_TABLE_SIZE - 1);
         let entry = &mut self.slots[slot];
-
         if !entry.is_unused() {
             false
         } else {
             entry.symbol = symbol;
-            entry.code = CodeMeta::new_symbol(code, symbol);
+            entry.code = Code::new_symbol_building(code, len);
             entry.ignored_bits = (64 - 8 * symbol.len()) as u16;
             true
+        }
+    }
+
+    /// Given a new code mapping, rewrite the codes into the new code range.
+    pub(crate) fn renumber(&mut self, new_codes: &[u8]) {
+        for slot in self.slots.iter_mut() {
+            if slot.code != Code::UNUSED {
+                let old_code = slot.code.code();
+                let new_code = new_codes[old_code as usize];
+                let len = slot.code.len();
+                slot.code = Code::new_symbol(new_code, len as usize);
+            }
         }
     }
 
     /// Remove the symbol from the hashtable, if it exists.
     pub(crate) fn remove(&mut self, symbol: Symbol) {
         let prefix_3bytes = symbol.as_u64() & 0xFF_FF_FF;
-        let slot = self.hash(prefix_3bytes) as usize & (HASH_TABLE_SIZE - 1);
-        self.slots[slot].code = CodeMeta::EMPTY;
+        let slot = fsst_hash(prefix_3bytes) as usize & (HASH_TABLE_SIZE - 1);
+        self.slots[slot].code = Code::UNUSED;
     }
 
     #[inline]
-    pub(crate) fn lookup(&self, word: u64) -> TableEntry {
+    pub(crate) fn lookup(&self, word: u64) -> &TableEntry {
         let prefix_3bytes = word & 0xFF_FF_FF;
-        let slot = self.hash(prefix_3bytes) as usize & (HASH_TABLE_SIZE - 1);
+        let slot = fsst_hash(prefix_3bytes) as usize & (HASH_TABLE_SIZE - 1);
 
-        // SAFETY: the slot is guaranteed to between 0...(HASH_TABLE_SIZE - 1).
-        unsafe { *self.slots.get_unchecked(slot) }
-    }
-
-    /// Hash a value to find the bucket it belongs in.
-    ///
-    /// The particular hash function comes from the code listing of Algorithm 4 of the FSST paper.
-    #[inline]
-    fn hash(&self, value: u64) -> u64 {
-        (value * 2971215073) ^ (value >> 15)
+        // SAFETY: the slot is guaranteed to between [0, HASH_TABLE_SIZE).
+        unsafe { self.slots.get_unchecked(slot) }
     }
 }
 

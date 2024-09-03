@@ -1,56 +1,122 @@
 //! Benchmarks for FSST compression, decompression, and symbol table training.
+//!
+//! We use the dbtext data at https://github.com/cwida/fsst/tree/master/paper/dbtext
 #![allow(missing_docs)]
 use core::str;
+use std::{
+    error::Error,
+    fs::{self, DirBuilder, File},
+    io::{Read, Write},
+    path::Path,
+};
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
+use criterion::{criterion_group, criterion_main, Criterion, Throughput};
 
-use fsst::{Compressor, ESCAPE_CODE};
+use curl::easy::Easy;
+use fsst::Compressor;
 
-const CORPUS: &str = include_str!("dracula.txt");
-const TEST: &str = "I found my smattering of German very useful here";
+fn download_dataset(url: &str, path: impl AsRef<Path>) -> Result<(), Box<dyn Error>> {
+    let target = path.as_ref();
 
-fn bench_fsst(c: &mut Criterion) {
-    let mut group = c.benchmark_group("fsst");
-    group.bench_function("train", |b| {
-        let corpus = CORPUS.as_bytes();
-        b.iter(|| black_box(Compressor::train(black_box(corpus))));
-    });
+    let mut dir_builder = DirBuilder::new();
+    dir_builder.recursive(true);
 
-    let compressor = Compressor::train(CORPUS);
-    let plaintext = TEST.as_bytes();
+    dir_builder.create(target.parent().unwrap())?;
 
-    let compressed = compressor.compress(plaintext);
-    let escape_count = compressed.iter().filter(|b| **b == ESCAPE_CODE).count();
-    let ratio = (plaintext.len() as f64) / (compressed.len() as f64);
-    println!(
-        "Escapes = {escape_count}/{}, compression_ratio = {ratio}",
-        compressed.len()
-    );
+    // Avoid downloading the file twice.
+    if target.exists() {
+        return Ok(());
+    }
 
-    let decompressor = compressor.decompressor();
-    let decompressed = decompressor.decompress(&compressed);
-    let decompressed = str::from_utf8(&decompressed).unwrap();
+    let mut handle = Easy::new();
 
-    group.throughput(Throughput::Elements(1));
-    group.bench_function("compress-word", |b| {
-        let mut out = vec![0u8; 8];
-        let out_ptr = out.as_mut_ptr();
-        let front = &TEST.as_bytes()[0..8];
-        let word = u64::from_le_bytes(front.try_into().unwrap());
+    let mut buffer = Vec::new();
+    handle.url(url)?;
+    {
+        let mut transfer = handle.transfer();
+        transfer.write_function(|data| {
+            buffer.extend_from_slice(data);
 
-        b.iter(|| black_box(unsafe { compressor.compress_word(word, out_ptr) }));
-    });
+            Ok(data.len())
+        })?;
+        transfer.perform()?;
+    }
 
-    group.throughput(Throughput::Bytes(CORPUS.len() as u64));
-    group.bench_function("compress-single", |b| {
-        b.iter(|| black_box(compressor.compress(black_box(CORPUS.as_bytes()))));
-    });
+    let mut output = File::create(target)?;
+    match output.write_all(&buffer) {
+        Ok(()) => {}
+        Err(err) => {
+            // cleanup in case of failure
+            fs::remove_file(target).unwrap();
 
-    group.throughput(Throughput::Bytes(decompressed.len() as u64));
-    group.bench_function("decompress-single", |b| {
-        b.iter(|| black_box(decompressor.decompress(black_box(&compressed))));
-    });
+            return Err(Box::new(err));
+        }
+    }
+
+    Ok(())
 }
 
-criterion_group!(compress_bench, bench_fsst);
+#[allow(clippy::use_debug)]
+fn bench_dbtext(c: &mut Criterion) {
+    fn run_dataset_bench(name: &str, url: &str, path: &str, c: &mut Criterion) {
+        let mut group = c.benchmark_group(name);
+        download_dataset(url, path).unwrap();
+
+        let mut buf = Vec::new();
+        {
+            let mut file = File::open(path).unwrap();
+            file.read_to_end(&mut buf).unwrap();
+        }
+
+        group.bench_function("train-and-compress", |b| {
+            b.iter_with_large_drop(|| {
+                let compressor = Compressor::train(&vec![&buf]);
+                compressor.compress_bulk(std::hint::black_box(&vec![&buf]))
+            });
+        });
+
+        let compressor = Compressor::train(&vec![&buf]);
+        let mut buffer = Vec::with_capacity(200 * 1024 * 1024);
+        group.throughput(Throughput::Bytes(buf.len() as u64));
+        group.bench_function("compress-only", |b| {
+            b.iter(|| unsafe { compressor.compress_into(&buf, &mut buffer) });
+        });
+
+        group.finish();
+
+        // Report the compression factor for this dataset.
+        let uncompressed_size = buf.len();
+        let compressor = Compressor::train(&vec![&buf]);
+
+        let compressed = compressor.compress_bulk(&vec![&buf]);
+        let compressed_size = compressed.iter().map(|l| l.len()).sum::<usize>();
+        let cf = (uncompressed_size as f64) / (compressed_size as f64);
+        println!(
+            "compressed {name} {uncompressed_size} => {compressed_size}B (compression factor {cf:.2}:1)"
+        )
+    }
+
+    run_dataset_bench(
+        "dbtext/wikipedia",
+        "https://raw.githubusercontent.com/cwida/fsst/4e188a/paper/dbtext/wikipedia",
+        "benches/data/wikipedia",
+        c,
+    );
+
+    run_dataset_bench(
+        "dbtext/l_comment",
+        "https://raw.githubusercontent.com/cwida/fsst/4e188a/paper/dbtext/l_comment",
+        "benches/data/l_comment",
+        c,
+    );
+
+    run_dataset_bench(
+        "dbtext/urls",
+        "https://raw.githubusercontent.com/cwida/fsst/4e188a/paper/dbtext/urls",
+        "benches/data/urls",
+        c,
+    );
+}
+
+criterion_group!(compress_bench, bench_dbtext);
 criterion_main!(compress_bench);

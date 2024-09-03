@@ -27,6 +27,7 @@ use_debug = { level = "deny" }
 
 [dev-dependencies]
 criterion = "0.5"
+curl = "*"
 
 [[example]]
 name = "round_trip"
@@ -35,6 +36,10 @@ test = false
 
 [[bench]]
 name = "compress"
+harness = false
+
+[[bench]]
+name = "micro"
 harness = false
 
 [[test]]

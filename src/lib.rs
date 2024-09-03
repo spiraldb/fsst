@@ -8,20 +8,18 @@ macro_rules! assert_sizeof {
     };
 }
 
-use std::fmt::{Debug, Formatter};
-
 use lossy_pht::LossyPHT;
+use std::fmt::{Debug, Formatter};
 
 mod builder;
 mod lossy_pht;
 
+pub use builder::*;
+
 /// `Symbol`s are small (up to 8-byte) segments of strings, stored in a [`Compressor`][`crate::Compressor`] and
 /// identified by an 8-bit code.
 #[derive(Copy, Clone)]
-pub union Symbol {
-    bytes: [u8; 8],
-    num: u64,
-}
+pub struct Symbol(u64);
 
 assert_sizeof!(Symbol => 8);
 
@@ -31,17 +29,26 @@ impl Symbol {
 
     /// Constructor for a `Symbol` from an 8-element byte slice.
     pub fn from_slice(slice: &[u8; 8]) -> Self {
-        Self { bytes: *slice }
+        let num: u64 = slice[0] as u64
+            | (slice[1] as u64) << 8
+            | (slice[2] as u64) << 16
+            | (slice[3] as u64) << 24
+            | (slice[4] as u64) << 32
+            | (slice[5] as u64) << 40
+            | (slice[6] as u64) << 48
+            | (slice[7] as u64) << 56;
+
+        Self(num)
     }
 
     /// Return a zero symbol
     const fn zero() -> Self {
-        Self { num: 0 }
+        Self(0)
     }
 
     /// Create a new single-byte symbol
     pub fn from_u8(value: u8) -> Self {
-        Self { num: value as u64 }
+        Self(value as u64)
     }
 }
 
@@ -53,8 +60,8 @@ impl Symbol {
     /// that holds the byte 0x00. In that case, the symbol contains `0x0000000000000000`
     /// but we want to interpret that as a one-byte symbol containing `0x00`.
     #[allow(clippy::len_without_is_empty)]
-    pub fn len(&self) -> usize {
-        let numeric = unsafe { self.num };
+    pub fn len(self) -> usize {
+        let numeric = self.0;
         // For little-endian platforms, this counts the number of *trailing* zeros
         let null_bytes = (numeric.leading_zeros() >> 3) as usize;
 
@@ -69,88 +76,72 @@ impl Symbol {
     }
 
     #[inline]
-    fn as_u64(&self) -> u64 {
-        // SAFETY: the bytes can always be viewed as a u64
-        unsafe { self.num }
+    fn as_u64(self) -> u64 {
+        self.0
     }
 
     /// Get the first byte of the symbol as a `u8`.
     ///
     /// If the symbol is empty, this will return the zero byte.
     #[inline]
-    pub fn first_byte(&self) -> u8 {
-        // SAFETY: the bytes can always be viewed as a u64
-        unsafe { self.num as u8 }
+    pub fn first_byte(self) -> u8 {
+        self.0 as u8
     }
 
     /// Get the first two bytes of the symbol as a `u16`.
     ///
     /// If the Symbol is one or zero bytes, this will return `0u16`.
     #[inline]
-    pub fn first_two_bytes(&self) -> u16 {
-        // SAFETY: the bytes can always be viewed as a u64
-        unsafe { self.num as u16 }
+    pub fn first2(self) -> u16 {
+        self.0 as u16
     }
 
-    /// Access the Symbol as a slice.
-    pub fn as_slice(&self) -> &[u8] {
-        let len = self.len();
-        // SAFETY: constructors will not allow building a struct where len > 8.
-        unsafe { &self.bytes[0..len] }
-    }
-
-    /// Returns true if the symbol is a prefix of the provided text.
-    pub fn is_prefix(&self, text: &[u8]) -> bool {
-        text.starts_with(self.as_slice())
+    /// Get the first two bytes of the symbol as a `u16`.
+    ///
+    /// If the Symbol is one or zero bytes, this will return `0u16`.
+    #[inline]
+    pub fn first3(self) -> u64 {
+        self.0 & 0xFF_FF_FF
     }
 
     /// Return a new `Symbol` by logically concatenating ourselves with another `Symbol`.
-    pub fn concat(&self, other: &Self) -> Self {
+    pub fn concat(self, other: Self) -> Self {
+        debug_assert!(
+            self.len() + other.len() <= 8,
+            "cannot build symbol with length > 8"
+        );
+
         let self_len = self.len();
-        let new_len = self_len + other.len();
-        assert!(new_len <= 8, "cannot build symbol with length > 8");
 
-        // SAFETY: we assert the combined length <= 8
-        unsafe {
-            Self {
-                num: (other.num << (8 * self_len)) | self.num,
-            }
-        }
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use crate::Symbol;
-
-    #[test]
-    fn test_concat() {
-        let symbola = Symbol::from_u8(b'a');
-        let symbolb = Symbol::from_u8(b'b');
-        let symbolab = symbola.concat(&symbolb);
-        assert_eq!(symbolab.as_slice(), b"ab");
+        Self((other.0 << (8 * self_len)) | self.0)
     }
 }
 
 impl Debug for Symbol {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let debug = self
-            .as_slice()
-            .iter()
-            .map(|c| *c as char)
-            .map(|c| {
-                if c.is_ascii() {
-                    format!("{c}")
-                } else {
-                    format!("{c:X?}")
-                }
-            })
-            .collect::<Vec<String>>();
-        write!(f, "{:?}", debug)
+        write!(f, "[")?;
+
+        let slice = &self.0.to_le_bytes()[0..self.len()];
+        for c in slice.iter().map(|c| *c as char) {
+            if ('!'..='~').contains(&c) {
+                write!(f, "{c}")?;
+            } else if c == '\n' {
+                write!(f, " \\n ")?;
+            } else if c == '\t' {
+                write!(f, " \\t ")?;
+            } else if c == ' ' {
+                write!(f, " SPACE ")?;
+            } else {
+                write!(f, " 0x{:X?} ", c as u8)?
+            }
+        }
+
+        write!(f, "]")
     }
 }
 
-/// Code and associated metadata fro a symbol.
+/// A packed type containing a code value, as well as metadata about the symbol referred to by
+/// the code.
 ///
 /// Logically, codes can range from 0-255 inclusive. This type holds both the 8-bit code as well as
 /// other metadata bit-packed into a `u16`.
@@ -164,7 +155,7 @@ impl Debug for Symbol {
 ///
 /// Bits 12-15 store the length of the symbol (values ranging from 0-8).
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-struct CodeMeta(u16);
+struct Code(u16);
 
 /// Code used to indicate bytes that are not in the symbol table.
 ///
@@ -174,46 +165,69 @@ struct CodeMeta(u16);
 /// being looked up in the symbol table.
 pub const ESCAPE_CODE: u8 = 255;
 
+/// Number of bits in the `ExtendedCode` that are used to dictate a code value.
+pub const FSST_CODE_BITS: usize = 9;
+
+/// First bit of the "length" portion of an extended code.
+pub const FSST_LEN_BITS: usize = 12;
+
+/// A code that never appears in practice, indicating an unused slot.
+pub const FSST_CODE_UNUSED: u16 = 1u16 << FSST_CODE_BITS;
+
+/// Maximum code value in the extended code range.
+pub const FSST_CODE_MAX: u16 = 1 << FSST_CODE_BITS;
+
 /// Maximum value for the extended code range.
 ///
 /// When truncated to u8 this is code 255, which is equivalent to [`ESCAPE_CODE`].
-pub const MAX_CODE: u16 = 511;
+pub const FSST_CODE_MASK: u16 = FSST_CODE_MAX - 1;
+
+/// First code in the symbol table that corresponds to a non-escape symbol.
+pub const FSST_CODE_BASE: u16 = 256;
 
 #[allow(clippy::len_without_is_empty)]
-impl CodeMeta {
-    const EMPTY: Self = CodeMeta(MAX_CODE);
+impl Code {
+    /// Code for an unused slot in a symbol table or index.
+    ///
+    /// This corresponds to the maximum code with a length of 1.
+    pub const UNUSED: Self = Code(FSST_CODE_MASK + (1 << 12));
 
-    fn new(code: u8, escape: bool, len: u16) -> Self {
-        let value = (len << 12) | ((escape as u16) << 8) | (code as u16);
-        Self(value)
+    /// Create a new code for a symbol of given length.
+    fn new_symbol(code: u8, len: usize) -> Self {
+        Self(code as u16 + ((len as u16) << FSST_LEN_BITS))
     }
 
-    /// Create a new code from a [`Symbol`].
-    fn new_symbol(code: u8, symbol: Symbol) -> Self {
-        assert_ne!(code, ESCAPE_CODE, "ESCAPE_CODE cannot be used for symbol");
+    /// Code for a new symbol during the building phase.
+    ///
+    /// The code is remapped from 0..254 to 256...510.
+    fn new_symbol_building(code: u8, len: usize) -> Self {
+        Self(code as u16 + 256 + ((len as u16) << FSST_LEN_BITS))
+    }
 
-        Self::new(code, false, symbol.len() as u16)
+    /// Create a new code corresponding for an escaped byte.
+    fn new_escape(byte: u8) -> Self {
+        Self((byte as u16) + (1 << FSST_LEN_BITS))
     }
 
     #[inline]
-    fn code(&self) -> u8 {
+    fn code(self) -> u8 {
         self.0 as u8
     }
 
     #[inline]
-    fn extended_code(&self) -> u16 {
+    fn extended_code(self) -> u16 {
         self.0 & 0b111_111_111
     }
 
     #[inline]
-    fn len(&self) -> u16 {
-        self.0 >> 12
+    fn len(self) -> u16 {
+        self.0 >> FSST_LEN_BITS
     }
 }
 
-impl Debug for CodeMeta {
+impl Debug for Code {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("CodeMeta")
+        f.debug_struct("TrainingCode")
             .field("code", &(self.0 as u8))
             .field("is_escape", &(self.0 < 256))
             .field("len", &(self.0 >> 12))
@@ -224,13 +238,11 @@ impl Debug for CodeMeta {
 /// Decompressor uses a symbol table to take a stream of 8-bit codes into a string.
 #[derive(Clone)]
 pub struct Decompressor<'a> {
-    /// Table mapping codes to symbols.
-    ///
-    /// The first 256 slots are escapes. The following slots (up to 254)
-    /// are for symbols with actual codes.
-    ///
-    /// This physical layout is important so that we can do straight-line execution in the decompress method.
+    /// Slice mapping codes to symbols.
     pub(crate) symbols: &'a [Symbol],
+
+    /// Slice containing the length of each symbol in the `symbols` slice.
+    pub(crate) lengths: &'a [u8],
 }
 
 impl<'a> Decompressor<'a> {
@@ -238,14 +250,14 @@ impl<'a> Decompressor<'a> {
     ///
     /// # Panics
     ///
-    /// If the provided symbol table has length greater than [`MAX_CODE`].
-    pub fn new(symbols: &'a [Symbol]) -> Self {
+    /// If the provided symbol table has length greater than 256
+    pub fn new(symbols: &'a [Symbol], lengths: &'a [u8]) -> Self {
         assert!(
-            symbols.len() <= MAX_CODE as usize,
-            "symbol table cannot have size exceeding MAX_CODE"
+            symbols.len() <= 255,
+            "symbol table cannot have size exceeding 255"
         );
 
-        Self { symbols }
+        Self { symbols, lengths }
     }
 
     /// Decompress a byte slice that was previously returned by a compressor using
@@ -265,24 +277,25 @@ impl<'a> Decompressor<'a> {
                 // SAFETY: out_pos is always 8 bytes or more from the end of decoded buffer
                 unsafe {
                     let write_addr = ptr.byte_offset(out_pos as isize);
-                    write_addr.write(compressed[in_pos]);
+                    std::ptr::write(write_addr, compressed[in_pos]);
                 }
                 out_pos += 1;
                 in_pos += 1;
             } else {
-                let symbol = self.symbols[256 + code as usize];
+                let symbol = self.symbols[code as usize];
+                let length = self.lengths[code as usize];
                 // SAFETY: out_pos is always 8 bytes or more from the end of decoded buffer
                 unsafe {
                     let write_addr = ptr.byte_offset(out_pos as isize) as *mut u64;
                     // Perform 8 byte unaligned write.
-                    write_addr.write_unaligned(symbol.num);
+                    write_addr.write_unaligned(symbol.as_u64());
                 }
                 in_pos += 1;
-                out_pos += symbol.len();
+                out_pos += length as usize;
             }
         }
 
-        assert!(
+        debug_assert!(
             in_pos >= compressed.len(),
             "decompression should exhaust input before output"
         );
@@ -302,11 +315,12 @@ impl<'a> Decompressor<'a> {
 /// Example usage:
 ///
 /// ```
-/// use fsst::{Symbol, Compressor};
-/// let mut compressor = Compressor::default();
-///
-/// // Insert a new symbol
-/// assert!(compressor.insert(Symbol::from_slice(&[b'h', b'e', b'l', b'l', b'o', 0, 0, 0])));
+/// use fsst::{Symbol, Compressor, CompressorBuilder};
+/// let compressor = {
+///     let mut builder = CompressorBuilder::new();
+///     builder.insert(Symbol::from_slice(&[b'h', b'e', b'l', b'l', b'o', 0, 0, 0]), 5);
+///     builder.build()
+/// };
 ///
 /// let compressed = compressor.compress("hello".as_bytes());
 /// assert_eq!(compressed, vec![0u8]);
@@ -316,39 +330,21 @@ pub struct Compressor {
     /// Table mapping codes to symbols.
     pub(crate) symbols: Vec<Symbol>,
 
+    /// Length of each symbol, values range from 1-8.
+    pub(crate) lengths: Vec<u8>,
+
     /// The number of entries in the symbol table that have been populated, not counting
     /// the escape values.
     pub(crate) n_symbols: u8,
 
     /// Inverted index mapping 2-byte symbols to codes
-    codes_twobyte: Vec<CodeMeta>,
+    codes_two_byte: Vec<Code>,
+
+    /// Limit of no suffixes.
+    has_suffix_code: u8,
 
     /// Lossy perfect hash table for looking up codes to symbols that are 3 bytes or more
     lossy_pht: LossyPHT,
-}
-
-impl Default for Compressor {
-    fn default() -> Self {
-        // NOTE: `vec!` has a specialization for building a new vector of `0u64`. Because Symbol and u64
-        //  have the same bit pattern, we can allocate as u64 and transmute. If we do `vec![Symbol::EMPTY; N]`,
-        // that will create a new Vec and call `Symbol::EMPTY.clone()` `N` times which is considerably slower.
-        let symbols = vec![0u64; 511];
-        // SAFETY: transmute safety assured by the compiler.
-        let symbols: Vec<Symbol> = unsafe { std::mem::transmute(symbols) };
-        let mut table = Self {
-            symbols,
-            n_symbols: 0,
-            codes_twobyte: vec![CodeMeta::EMPTY; 65_536],
-            lossy_pht: LossyPHT::new(),
-        };
-
-        // Populate the escape byte entries.
-        for byte in 0..=255 {
-            table.symbols[byte as usize] = Symbol::from_u8(byte);
-        }
-
-        table
-    }
 }
 
 /// The core structure of the FSST codec, holding a mapping between `Symbol`s and `Code`s.
@@ -356,32 +352,6 @@ impl Default for Compressor {
 /// The symbol table is trained on a corpus of data in the form of a single byte array, building up
 /// a mapping of 1-byte "codes" to sequences of up to `N` plaintext bytse, or "symbols".
 impl Compressor {
-    /// Attempt to insert a new symbol at the end of the table.
-    ///
-    /// # Panics
-    /// Panics if the table is already full.
-    pub fn insert(&mut self, symbol: Symbol) -> bool {
-        assert!(self.n_symbols < 255, "cannot insert into full symbol table");
-
-        let symbol_len = symbol.len();
-        if symbol_len <= 2 {
-            // Insert the 2-byte symbol into the twobyte cache
-            self.codes_twobyte[symbol.first_two_bytes() as usize] =
-                CodeMeta::new_symbol(self.n_symbols, symbol);
-        } else {
-            // Attempt to insert larger symbols into the 3-byte cache
-            if !self.lossy_pht.insert(symbol, self.n_symbols) {
-                return false;
-            }
-        }
-
-        // Insert at the end of the symbols table.
-        // Note the rescaling from range [0-254] -> [256, 510].
-        self.symbols[256 + (self.n_symbols as usize)] = symbol;
-        self.n_symbols += 1;
-        true
-    }
-
     /// Using the symbol table, runs a single cycle of compression on an input word, writing
     /// the output into `out_ptr`.
     ///
@@ -397,57 +367,98 @@ impl Compressor {
     /// # Safety
     ///
     /// `out_ptr` must never be NULL or otherwise point to invalid memory.
-    #[inline]
+    #[inline(never)]
     pub unsafe fn compress_word(&self, word: u64, out_ptr: *mut u8) -> (usize, usize) {
         // Speculatively write the first byte of `word` at offset 1. This is necessary if it is an escape, and
         // if it isn't, it will be overwritten anyway.
         //
         // SAFETY: caller ensures out_ptr is not null
         let first_byte = word as u8;
-        unsafe { out_ptr.byte_add(1).write_unaligned(first_byte) };
+        out_ptr.byte_add(1).write_unaligned(first_byte);
 
-        // Probe the hash table
-        let entry = self.lossy_pht.lookup(word);
+        // First, check the two_bytes table
+        let code_twobyte = self.codes_two_byte[word as u16 as usize];
 
-        // Now, downshift the `word` and the `entry` to see if they align.
-        let ignored_bits = entry.ignored_bits;
+        if code_twobyte.code() < self.has_suffix_code {
+            // 2 byte code without having to worry about longer matches.
+            std::ptr::write(out_ptr, code_twobyte.code());
 
-        if !compare_masked(word, entry.symbol.as_u64(), ignored_bits) || entry.is_unused() {
-            // lookup the appropriate code for the twobyte sequence and write it
-            // This will hold either 511, OR it will hold the actual code.
-            let code = self.codes_twobyte[(word as u16) as usize];
-            let out = code.code();
-            unsafe {
-                out_ptr.write(out);
+            // Advance input by symbol length (2) and output by a single code byte
+            (2, 1)
+        } else {
+            // Probe the hash table
+            let entry = self.lossy_pht.lookup(word);
+
+            // Now, downshift the `word` and the `entry` to see if they align.
+            let ignored_bits = entry.ignored_bits;
+            if entry.code != Code::UNUSED
+                && compare_masked(word, entry.symbol.as_u64(), ignored_bits)
+            {
+                // Advance the input by the symbol length (variable) and the output by one code byte
+                std::ptr::write(out_ptr, entry.code.code());
+                (entry.code.len() as usize, 1)
+            } else {
+                std::ptr::write(out_ptr, code_twobyte.code());
+
+                // Advance the input by the symbol length (variable) and the output by either 1
+                // byte (if was one-byte code) or two bytes (escape).
+                (
+                    code_twobyte.len() as usize,
+                    // Predicated version of:
+                    //
+                    // if entry.code >= 256 {
+                    //      2
+                    // } else {
+                    //      1
+                    // }
+                    1 + (code_twobyte.extended_code() >> 8) as usize,
+                )
             }
-
-            // Advance the input by one byte and the output by 1 byte (if real code) or 2 bytes (if escape).
-            return (
-                if out == ESCAPE_CODE {
-                    1
-                } else {
-                    code.len() as usize
-                },
-                if out == ESCAPE_CODE { 2 } else { 1 },
-            );
         }
-
-        let code = entry.code;
-        unsafe {
-            out_ptr.write_unaligned(code.code());
-        }
-
-        (code.len() as usize, 1)
     }
 
-    /// Use the symbol table to compress the plaintext into a sequence of codes and escapes.
-    pub fn compress(&self, plaintext: &[u8]) -> Vec<u8> {
-        if plaintext.is_empty() {
-            return Vec::new();
+    /// Compress many lines in bulk.
+    pub fn compress_bulk(&self, lines: &Vec<&[u8]>) -> Vec<Vec<u8>> {
+        let mut res = Vec::new();
+
+        for line in lines {
+            res.push(self.compress(line));
         }
 
-        let mut values: Vec<u8> = Vec::with_capacity(2 * plaintext.len());
+        res
+    }
 
+    /// Compress a string, writing its result into a target buffer.
+    ///
+    /// The target buffer is a byte vector that must have capacity large enough
+    /// to hold the encoded data.
+    ///
+    /// When this call returns, `values` will hold the compressed bytes and have
+    /// its length set to the length of the compresed text.
+    ///
+    /// ```
+    /// use fsst::{Compressor, CompressorBuilder, Symbol};
+    ///
+    /// let mut compressor = CompressorBuilder::new();
+    /// assert!(compressor.insert(Symbol::from_slice(b"aaaaaaaa"), 8));
+    ///
+    /// let compressor = compressor.build();
+    ///
+    /// let mut compressed_values = Vec::with_capacity(1_024);
+    ///
+    /// // SAFETY: we have over-sized compressed_values.
+    /// unsafe {
+    ///     compressor.compress_into(b"aaaaaaaa", &mut compressed_values);
+    /// }
+    ///
+    /// assert_eq!(compressed_values, vec![0u8]);
+    /// ```
+    ///
+    /// # Safety
+    ///
+    /// It is up to the caller to ensure the provided buffer is large enough to hold
+    /// all encoded data.
+    pub unsafe fn compress_into(&self, plaintext: &[u8], values: &mut Vec<u8>) {
         let mut in_ptr = plaintext.as_ptr();
         let mut out_ptr = values.as_mut_ptr();
 
@@ -457,12 +468,12 @@ impl Compressor {
         // SAFETY: `end` will point just after the end of the `values` allocation.
         let out_end = unsafe { out_ptr.byte_add(values.capacity()) };
 
-        while (in_ptr as usize) < in_end_sub8 && out_ptr < out_end {
+        while (in_ptr as usize) <= in_end_sub8 && out_ptr < out_end {
             // SAFETY: pointer ranges are checked in the loop condition
             unsafe {
                 // Load a full 8-byte word of data from in_ptr.
                 // SAFETY: caller asserts in_ptr is not null. we may read past end of pointer though.
-                let word: u64 = (in_ptr as *const u64).read_unaligned();
+                let word: u64 = std::ptr::read_unaligned(in_ptr as *const u64);
                 let (advance_in, advance_out) = self.compress_word(word, out_ptr);
                 in_ptr = in_ptr.byte_add(advance_in);
                 out_ptr = out_ptr.byte_add(advance_out);
@@ -471,39 +482,27 @@ impl Compressor {
 
         let remaining_bytes = unsafe { in_end.byte_offset_from(in_ptr) };
         assert!(
-            remaining_bytes.is_positive(),
-            "in_ptr exceeded in_end, should not be possible"
+            out_ptr < out_end || remaining_bytes == 0,
+            "output buffer sized too small"
         );
+
         let remaining_bytes = remaining_bytes as usize;
 
         // Load the last `remaining_byte`s of data into a final world. We then replicate the loop above,
         // but shift data out of this word rather than advancing an input pointer and potentially reading
         // unowned memory.
-        let mut last_word = unsafe {
-            match remaining_bytes {
-                0 => 0,
-                1 => extract_u64::<1>(in_ptr),
-                2 => extract_u64::<2>(in_ptr),
-                3 => extract_u64::<3>(in_ptr),
-                4 => extract_u64::<4>(in_ptr),
-                5 => extract_u64::<5>(in_ptr),
-                6 => extract_u64::<6>(in_ptr),
-                7 => extract_u64::<7>(in_ptr),
-                8 => extract_u64::<8>(in_ptr),
-                _ => unreachable!("remaining bytes must be <= 8"),
-            }
-        };
+        let mut bytes = [0u8; 8];
+        std::ptr::copy_nonoverlapping(in_ptr, bytes.as_mut_ptr(), remaining_bytes);
+        let mut last_word = u64::from_le_bytes(bytes);
 
         while in_ptr < in_end && out_ptr < out_end {
-            unsafe {
-                // Load a full 8-byte word of data from in_ptr.
-                // SAFETY: caller asserts in_ptr is not null. we may read past end of pointer though.
-                let (advance_in, advance_out) = self.compress_word(last_word, out_ptr);
-                in_ptr = in_ptr.byte_add(advance_in);
-                out_ptr = out_ptr.byte_add(advance_out);
+            // Load a full 8-byte word of data from in_ptr.
+            // SAFETY: caller asserts in_ptr is not null. we may read past end of pointer though.
+            let (advance_in, advance_out) = self.compress_word(last_word, out_ptr);
+            in_ptr = in_ptr.byte_add(advance_in);
+            out_ptr = out_ptr.byte_add(advance_out);
 
-                last_word = advance_8byte_word(last_word, advance_in);
-            }
+            last_word = advance_8byte_word(last_word, advance_in);
         }
 
         // in_ptr should have exceeded in_end
@@ -511,36 +510,54 @@ impl Compressor {
 
         // Count the number of bytes written
         // SAFETY: assertion
-        unsafe {
-            let bytes_written = out_ptr.offset_from(values.as_ptr());
-            assert!(
-                bytes_written.is_positive(),
-                "out_ptr ended before it started, not possible"
-            );
+        let bytes_written = out_ptr.offset_from(values.as_ptr());
+        assert!(
+            bytes_written.is_positive(),
+            "out_ptr ended before it started, not possible"
+        );
 
-            values.set_len(bytes_written as usize);
+        values.set_len(bytes_written as usize);
+    }
+
+    /// Use the symbol table to compress the plaintext into a sequence of codes and escapes.
+    pub fn compress(&self, plaintext: &[u8]) -> Vec<u8> {
+        if plaintext.is_empty() {
+            return Vec::new();
         }
 
-        values
+        let mut buffer = Vec::with_capacity(plaintext.len() * 2);
+
+        // SAFETY: the largest compressed size would be all escapes == 2*plaintext_len
+        unsafe { self.compress_into(plaintext, &mut buffer) };
+
+        buffer
     }
 
     /// Access the decompressor that can be used to decompress strings emitted from this
     /// `Compressor` instance.
     pub fn decompressor(&self) -> Decompressor {
-        Decompressor::new(self.symbol_table())
+        Decompressor::new(self.symbol_table(), self.symbol_lengths())
     }
 
     /// Returns a readonly slice of the current symbol table.
     ///
-    /// The returned slice will have length of `256 + n_symbols`.
+    /// The returned slice will have length of `n_symbols`.
     pub fn symbol_table(&self) -> &[Symbol] {
-        &self.symbols[0..(256 + self.n_symbols as usize)]
+        &self.symbols[0..self.n_symbols as usize]
+    }
+
+    /// Returns a readonly slice where index `i` contains the
+    /// length of the symbol represented by code `i`.
+    ///
+    /// Values range from 1-8.
+    pub fn symbol_lengths(&self) -> &[u8] {
+        &self.lengths[0..self.n_symbols as usize]
     }
 }
 
 #[inline]
-fn advance_8byte_word(word: u64, bytes: usize) -> u64 {
-    // shift the word off the right-end, because little endian means the first
+pub(crate) fn advance_8byte_word(word: u64, bytes: usize) -> u64 {
+    // shift the word off the low-end, because little endian means the first
     // char is stored in the LSB.
     //
     // Note that even though this looks like it branches, Rust compiles this to a
@@ -553,47 +570,7 @@ fn advance_8byte_word(word: u64, bytes: usize) -> u64 {
 }
 
 #[inline]
-fn compare_masked(left: u64, right: u64, ignored_bits: u16) -> bool {
-    let mask = if ignored_bits == 64 {
-        0
-    } else {
-        u64::MAX >> ignored_bits
-    };
-
+pub(crate) fn compare_masked(left: u64, right: u64, ignored_bits: u16) -> bool {
+    let mask = u64::MAX >> ignored_bits;
     (left & mask) == right
-}
-
-/// This is a function that will get monomorphized based on the value of `N` to do
-/// a load of `N` values from the pointer in a minimum number of instructions into
-/// an output `u64`.
-#[inline]
-unsafe fn extract_u64<const N: usize>(ptr: *const u8) -> u64 {
-    match N {
-        1 => ptr.read() as u64,
-        2 => (ptr as *const u16).read_unaligned() as u64,
-        3 => {
-            let low = ptr.read() as u64;
-            let high = (ptr.byte_add(1) as *const u16).read_unaligned() as u64;
-            high << 8 | low
-        }
-        4 => (ptr as *const u32).read_unaligned() as u64,
-        5 => {
-            let low = (ptr as *const u32).read_unaligned() as u64;
-            let high = ptr.byte_add(4).read() as u64;
-            high << 32 | low
-        }
-        6 => {
-            let low = (ptr as *const u32).read_unaligned() as u64;
-            let high = (ptr.byte_add(4) as *const u16).read_unaligned() as u64;
-            high << 32 | low
-        }
-        7 => {
-            let low = (ptr as *const u32).read_unaligned() as u64;
-            let mid = (ptr.byte_add(4) as *const u16).read_unaligned() as u64;
-            let high = ptr.byte_add(6).read() as u64;
-            (high << 48) | (mid << 32) | low
-        }
-        8 => (ptr as *const u64).read_unaligned(),
-        _ => unreachable!("N must be <= 8"),
-    }
 }

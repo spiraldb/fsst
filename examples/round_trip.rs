@@ -7,7 +7,7 @@ use fsst::Compressor;
 fn main() {
     // Train on a sample.
     let sample = "the quick brown fox jumped over the lazy dog";
-    let trained = Compressor::train(sample.as_bytes());
+    let trained = Compressor::train(&vec![sample.as_bytes()]);
     let compressed = trained.compress(sample.as_bytes());
     println!("compressed: {} => {}", sample.len(), compressed.len());
     // decompress now
