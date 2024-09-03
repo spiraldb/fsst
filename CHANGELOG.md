@@ -6,6 +6,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0](https://github.com/spiraldb/fsst/compare/v0.2.3...v0.3.0) - 2024-09-03
+
+### Added
+- port in more from the C++ code ([#24](https://github.com/spiraldb/fsst/pull/24))
+
+### Other
+- centering ([#26](https://github.com/spiraldb/fsst/pull/26))
+
 ## [0.2.3](https://github.com/spiraldb/fsst/compare/v0.2.2...v0.2.3) - 2024-08-22
 
 ### Added
