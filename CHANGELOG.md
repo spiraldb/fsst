@@ -6,6 +6,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0](https://github.com/spiraldb/fsst/compare/v0.3.0...v0.4.0) - 2024-09-03
+
+### Fixed
+- hash_table_sizing, inline hints, lint rule ([#29](https://github.com/spiraldb/fsst/pull/29))
+
 ## [0.3.0](https://github.com/spiraldb/fsst/compare/v0.2.3...v0.3.0) - 2024-09-03
 
 ### Added
