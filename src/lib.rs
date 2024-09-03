@@ -29,14 +29,7 @@ impl Symbol {
 
     /// Constructor for a `Symbol` from an 8-element byte slice.
     pub fn from_slice(slice: &[u8; 8]) -> Self {
-        let num: u64 = slice[0] as u64
-            | (slice[1] as u64) << 8
-            | (slice[2] as u64) << 16
-            | (slice[3] as u64) << 24
-            | (slice[4] as u64) << 32
-            | (slice[5] as u64) << 40
-            | (slice[6] as u64) << 48
-            | (slice[7] as u64) << 56;
+        let num: u64 = u64::from_le_bytes(*slice);
 
         Self(num)
     }
