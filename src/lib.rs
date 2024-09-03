@@ -164,9 +164,6 @@ pub const FSST_CODE_BITS: usize = 9;
 /// First bit of the "length" portion of an extended code.
 pub const FSST_LEN_BITS: usize = 12;
 
-/// A code that never appears in practice, indicating an unused slot.
-pub const FSST_CODE_UNUSED: u16 = 1u16 << FSST_CODE_BITS;
-
 /// Maximum code value in the extended code range.
 pub const FSST_CODE_MAX: u16 = 1 << FSST_CODE_BITS;
 
@@ -343,7 +340,7 @@ pub struct Compressor {
 /// The core structure of the FSST codec, holding a mapping between `Symbol`s and `Code`s.
 ///
 /// The symbol table is trained on a corpus of data in the form of a single byte array, building up
-/// a mapping of 1-byte "codes" to sequences of up to `N` plaintext bytse, or "symbols".
+/// a mapping of 1-byte "codes" to sequences of up to 8 plaintext bytes, or "symbols".
 impl Compressor {
     /// Using the symbol table, runs a single cycle of compression on an input word, writing
     /// the output into `out_ptr`.
