@@ -384,8 +384,11 @@ impl CompressorBuilder {
     ///
     /// Returns the `suffix_lim`, which is the index of the two-byte code before where we know
     /// there are no longer suffixies in the symbol table.
+    ///
+    /// Also returns the lengths vector, which is of length `n_symbols` and contains the
+    /// length for each of the values.
     #[inline(never)]
-    fn finalize(&mut self) -> u8 {
+    fn finalize(&mut self) -> (u8, Vec<u8>) {
         // Create a cumulative sum of each of the elements of the input line numbers.
         // Do a map that includes the previously seen value as well.
         // Regroup symbols based on their lengths.
@@ -486,7 +489,13 @@ impl CompressorBuilder {
         // Reset values in the hash table as well.
         self.lossy_pht.renumber(&new_codes);
 
-        has_suffix_code
+        // Pre-compute the lengths
+        let mut lengths = Vec::with_capacity(self.n_symbols as usize);
+        for symbol in &self.symbols {
+            lengths.push(symbol.len() as u8);
+        }
+
+        (has_suffix_code, lengths)
     }
 
     /// Build into the final hash table.
@@ -494,10 +503,11 @@ impl CompressorBuilder {
         // finalize the symbol table by inserting the codes_twobyte values into
         // the relevant parts of the `codes_onebyte` set.
 
-        let has_suffix_code = self.finalize();
+        let (has_suffix_code, lengths) = self.finalize();
 
         Compressor {
             symbols: self.symbols,
+            lengths,
             n_symbols: self.n_symbols,
             has_suffix_code,
             codes_two_byte: self.codes_two_byte,

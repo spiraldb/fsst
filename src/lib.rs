@@ -192,12 +192,14 @@ impl Code {
     /// This corresponds to the maximum code with a length of 1.
     pub const UNUSED: Self = Code(FSST_CODE_MASK + (1 << 12));
 
-    /// Create a new code for a symbol of given length
+    /// Create a new code for a symbol of given length.
     fn new_symbol(code: u8, len: usize) -> Self {
         Self(code as u16 + ((len as u16) << FSST_LEN_BITS))
     }
 
     /// Code for a new symbol during the building phase.
+    ///
+    /// The code is remapped from 0..254 to 256...510.
     fn new_symbol_building(code: u8, len: usize) -> Self {
         Self(code as u16 + 256 + ((len as u16) << FSST_LEN_BITS))
     }
@@ -236,13 +238,11 @@ impl Debug for Code {
 /// Decompressor uses a symbol table to take a stream of 8-bit codes into a string.
 #[derive(Clone)]
 pub struct Decompressor<'a> {
-    /// Table mapping codes to symbols.
-    ///
-    /// The first 256 slots are escapes. The following slots (up to 254)
-    /// are for symbols with actual codes.
-    ///
-    /// This physical layout is important so that we can do straight-line execution in the decompress method.
+    /// Slice mapping codes to symbols.
     pub(crate) symbols: &'a [Symbol],
+
+    /// Slice containing the length of each symbol in the `symbols` slice.
+    pub(crate) lengths: &'a [u8],
 }
 
 impl<'a> Decompressor<'a> {
@@ -251,13 +251,13 @@ impl<'a> Decompressor<'a> {
     /// # Panics
     ///
     /// If the provided symbol table has length greater than 256
-    pub fn new(symbols: &'a [Symbol]) -> Self {
+    pub fn new(symbols: &'a [Symbol], lengths: &'a [u8]) -> Self {
         assert!(
             symbols.len() <= 255,
             "symbol table cannot have size exceeding 255"
         );
 
-        Self { symbols }
+        Self { symbols, lengths }
     }
 
     /// Decompress a byte slice that was previously returned by a compressor using
@@ -283,6 +283,7 @@ impl<'a> Decompressor<'a> {
                 in_pos += 1;
             } else {
                 let symbol = self.symbols[code as usize];
+                let length = self.lengths[code as usize];
                 // SAFETY: out_pos is always 8 bytes or more from the end of decoded buffer
                 unsafe {
                     let write_addr = ptr.byte_offset(out_pos as isize) as *mut u64;
@@ -290,7 +291,7 @@ impl<'a> Decompressor<'a> {
                     write_addr.write_unaligned(symbol.as_u64());
                 }
                 in_pos += 1;
-                out_pos += symbol.len();
+                out_pos += length as usize;
             }
         }
 
@@ -328,6 +329,9 @@ impl<'a> Decompressor<'a> {
 pub struct Compressor {
     /// Table mapping codes to symbols.
     pub(crate) symbols: Vec<Symbol>,
+
+    /// Length of each symbol, values range from 1-8.
+    pub(crate) lengths: Vec<u8>,
 
     /// The number of entries in the symbol table that have been populated, not counting
     /// the escape values.
@@ -387,7 +391,6 @@ impl Compressor {
 
             // Now, downshift the `word` and the `entry` to see if they align.
             let ignored_bits = entry.ignored_bits;
-
             if entry.code != Code::UNUSED
                 && compare_masked(word, entry.symbol.as_u64(), ignored_bits)
             {
@@ -547,14 +550,22 @@ impl Compressor {
     /// Access the decompressor that can be used to decompress strings emitted from this
     /// `Compressor` instance.
     pub fn decompressor(&self) -> Decompressor {
-        Decompressor::new(self.symbol_table())
+        Decompressor::new(self.symbol_table(), self.symbol_lengths())
     }
 
     /// Returns a readonly slice of the current symbol table.
     ///
     /// The returned slice will have length of `n_symbols`.
     pub fn symbol_table(&self) -> &[Symbol] {
-        unsafe { std::slice::from_raw_parts(self.symbols.as_ptr(), self.n_symbols as usize) }
+        &self.symbols[0..self.n_symbols as usize]
+    }
+
+    /// Returns a readonly slice where index `i` contains the
+    /// length of the symbol represented by code `i`.
+    ///
+    /// Values range from 1-8.
+    pub fn symbol_lengths(&self) -> &[u8] {
+        &self.lengths[0..self.n_symbols as usize]
     }
 }
 
