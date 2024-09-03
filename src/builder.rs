@@ -387,7 +387,6 @@ impl CompressorBuilder {
     ///
     /// Also returns the lengths vector, which is of length `n_symbols` and contains the
     /// length for each of the values.
-    #[inline(never)]
     fn finalize(&mut self) -> (u8, Vec<u8>) {
         // Create a cumulative sum of each of the elements of the input line numbers.
         // Do a map that includes the previously seen value as well.

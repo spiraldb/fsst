@@ -1,19 +1,15 @@
-// TODO: remove
-#![allow(unused)]
-
 use std::fmt::Debug;
 
 use crate::builder::fsst_hash;
+use crate::Code;
 use crate::Symbol;
-use crate::FSST_CODE_MASK;
-use crate::{Code, FSST_CODE_UNUSED};
 
 /// Size of the perfect hash table.
 ///
 /// NOTE: this differs from the paper, which recommends a 64KB total
 /// table size. The paper does not account for the fact that most
 /// vendors split the L1 cache into 32KB of instruction and 32KB of data.
-pub const HASH_TABLE_SIZE: usize = 1 << 12;
+pub const HASH_TABLE_SIZE: usize = 1 << 11;
 
 /// A single entry in the [Lossy Perfect Hash Table][`LossyPHT`].
 ///

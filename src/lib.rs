@@ -367,7 +367,6 @@ impl Compressor {
     /// # Safety
     ///
     /// `out_ptr` must never be NULL or otherwise point to invalid memory.
-    #[inline(never)]
     pub unsafe fn compress_word(&self, word: u64, out_ptr: *mut u8) -> (usize, usize) {
         // Speculatively write the first byte of `word` at offset 1. This is necessary if it is an escape, and
         // if it isn't, it will be overwritten anyway.
