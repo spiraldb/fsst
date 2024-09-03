@@ -10,46 +10,28 @@ fn one_megabyte(seed: &[u8]) -> Vec<u8> {
 
 fn bench_compress(c: &mut Criterion) {
     let mut group = c.benchmark_group("compress-overhead");
-    group.bench_function("compress-word", |b| {
-        let mut compressor = CompressorBuilder::new();
-        compressor.insert(Symbol::from_u8(b'a'), 1);
-        let compressor = compressor.build();
-
-        let mut output = [0u8, 0u8];
-
-        b.iter(|| unsafe {
-            compressor.compress_word('a' as u64, output.as_mut_ptr());
-        });
-    });
-
     // Reusable memory to hold outputs
-    let mut output_buf: Vec<u8> = Vec::with_capacity(1_024 * 1024 * 2);
+    let mut output_buf: Vec<u8> = Vec::with_capacity(12);
 
+    // We create a symbol table that requires probing the hash table to perform
+    // decompression.
     group.bench_function("compress-hashtab", |b| {
-        // We create a symbol table and an input that will execute exactly one iteration,
-        // in the fast compress_word pathway.
         let mut compressor = CompressorBuilder::new();
         compressor.insert(Symbol::from_slice(b"abcdefgh"), 8);
         let compressor = compressor.build();
 
-        b.iter(|| unsafe {
-            compressor.compress_into(
-                b"abcdefghabcdefghabcdefghabcdefghabcdefghabcdefghabcdefghabcdefgh",
-                &mut output_buf,
-            );
-        });
+        let word = u64::from_le_bytes([b'a', b'b', b'c', b'd', b'e', b'f', b'g', b'h']);
+        b.iter(|| unsafe { compressor.compress_word(word, output_buf.as_mut_ptr()) });
     });
 
+    // We create a symbol table that is able to short-circuit the decompression
     group.bench_function("compress-twobytes", |b| {
-        // We create a symbol table and an input that will execute exactly one iteration,
-        // in the fast compress_word pathway.
         let mut compressor = CompressorBuilder::new();
-        compressor.insert(Symbol::from_slice(&[b'a', b'b', 0, 0, 0, 0, 0, 0]), 8);
+        compressor.insert(Symbol::from_slice(&[b'a', b'b', 0, 0, 0, 0, 0, 0]), 2);
         let compressor = compressor.build();
 
-        b.iter(|| unsafe {
-            compressor.compress_into(b"abababababababab", &mut output_buf);
-        });
+        let word = u64::from_le_bytes([b'a', b'b', 0, 0, 0, 0, 0, 0]);
+        b.iter(|| unsafe { compressor.compress_word(word, output_buf.as_mut_ptr()) });
     });
     group.finish();
 
