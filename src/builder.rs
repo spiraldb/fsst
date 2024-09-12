@@ -589,7 +589,7 @@ fn make_sample<'a, 'b: 'a>(sample_buf: &'a mut Vec<u8>, str_in: &Vec<&'b [u8]>) 
 /// This is equivalent to the FSST_HASH macro from the C++ implementation.
 #[inline]
 pub(crate) fn fsst_hash(value: u64) -> u64 {
-    (value * 2971215073) ^ (value >> 15)
+    value.wrapping_mul(2971215073) ^ value.wrapping_shr(15)
 }
 
 impl Compressor {
