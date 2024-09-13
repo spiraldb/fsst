@@ -89,9 +89,9 @@ impl Symbol {
         self.0 as u16
     }
 
-    /// Get the first two bytes of the symbol as a `u16`.
+    /// Get the first three bytes of the symbol as a `u64`.
     ///
-    /// If the Symbol is one or zero bytes, this will return `0u16`.
+    /// If the Symbol is one or zero bytes, this will return `0u64`.
     #[inline]
     pub fn first3(self) -> u64 {
         self.0 & 0xFF_FF_FF
@@ -423,7 +423,7 @@ impl Compressor {
     /// to hold the encoded data.
     ///
     /// When this call returns, `values` will hold the compressed bytes and have
-    /// its length set to the length of the compresed text.
+    /// its length set to the length of the compressed text.
     ///
     /// ```
     /// use fsst::{Compressor, CompressorBuilder, Symbol};
