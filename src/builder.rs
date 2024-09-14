@@ -551,26 +551,25 @@ fn make_sample<'a, 'b: 'a>(sample_buf: &'a mut Vec<u8>, str_in: &Vec<&'b [u8]>) 
 
     while sample_buf_offset < sample_lim {
         sample_rnd = fsst_hash(sample_rnd);
-        let mut line_nr = (sample_rnd as usize) % str_in.len();
+        let line_nr = (sample_rnd as usize) % str_in.len();
 
         // Find the first non-empty chunk starting at line_nr, wrapping around if
         // necessary.
-        //
-        // TODO: this will loop infinitely if there are no non-empty lines in the sample
-        while str_in[line_nr].is_empty() {
-            if line_nr == str_in.len() {
-                line_nr = 0;
-            }
-        }
+        let Some(line) = (line_nr..str_in.len())
+            .chain(0..line_nr)
+            .map(|line_nr| str_in[line_nr])
+            .find(|line| !line.is_empty())
+        else {
+            return sample;
+        };
 
-        let line = str_in[line_nr];
         let chunks = 1 + ((line.len() - 1) / FSST_SAMPLELINE);
         sample_rnd = fsst_hash(sample_rnd);
         let chunk = FSST_SAMPLELINE * ((sample_rnd as usize) % chunks);
 
         let len = FSST_SAMPLELINE.min(line.len() - chunk);
 
-        sample_buf.extend_from_slice(&str_in[line_nr][chunk..chunk + len]);
+        sample_buf.extend_from_slice(&line[chunk..chunk + len]);
 
         // SAFETY: this is the data we just placed into `sample_buf` in the line above.
         let slice =
