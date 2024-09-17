@@ -501,7 +501,7 @@ impl Compressor {
         // SAFETY: assertion
         let bytes_written = out_ptr.offset_from(values.as_ptr());
         assert!(
-            bytes_written.is_positive(),
+            bytes_written >= 0,
             "out_ptr ended before it started, not possible"
         );
 
