@@ -270,7 +270,7 @@ impl<'a> Decompressor<'a> {
                 // SAFETY: out_pos is always 8 bytes or more from the end of decoded buffer
                 // SAFETY: ESCAPE_CODE can not be the last byte of the compressed stream
                 unsafe {
-                    let write_addr = ptr.add(out_pos);
+                    let write_addr = ptr.byte_add(out_pos);
                     std::ptr::write(write_addr, *compressed.get_unchecked(in_pos));
                 }
                 out_pos += 1;
