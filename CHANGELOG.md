@@ -6,6 +6,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.3](https://github.com/spiraldb/fsst/compare/v0.4.2...v0.4.3) - 2024-10-03
+
+### Added
+
+- 35% faster decompression with less boundary check ([#41](https://github.com/spiraldb/fsst/pull/41))
+
+### Other
+
+- *(deps)* update rust crate curl to v0.4.47 ([#40](https://github.com/spiraldb/fsst/pull/40))
+- *(deps)* update mozilla-actions/sccache-action action to v0.0.6 ([#38](https://github.com/spiraldb/fsst/pull/38))
+
 ## [0.4.2](https://github.com/spiraldb/fsst/compare/v0.4.1...v0.4.2) - 2024-09-17
 
 ### Fixed
