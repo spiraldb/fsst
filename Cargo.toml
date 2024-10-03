@@ -1,6 +1,6 @@
 [package]
 name = "fsst-rs"
-version = "0.4.2"
+version = "0.4.3"
 description = "Pure-Rust implementation of Fast Static Symbol Tables algorithm for string compression"
 authors = ["SpiralDB Developers <hello@spiraldb.com>"]
 license = "Apache-2.0"
