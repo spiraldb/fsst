@@ -282,7 +282,7 @@ impl<'a> Decompressor<'a> {
                 let length = unsafe { *self.lengths.get_unchecked(code as usize) };
                 // SAFETY: out_pos is always 8 bytes or more from the end of decoded buffer
                 unsafe {
-                    let write_addr = ptr.add(out_pos) as *mut u64;
+                    let write_addr = ptr.byte_add(out_pos) as *mut u64;
                     // Perform 8 byte unaligned write.
                     write_addr.write_unaligned(symbol.as_u64());
                 }
