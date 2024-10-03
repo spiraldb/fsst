@@ -259,24 +259,30 @@ impl<'a> Decompressor<'a> {
         let mut in_pos = 0;
         let mut out_pos = 0;
 
-        while in_pos < compressed.len() && out_pos < (decoded.capacity() - size_of::<Symbol>()) {
-            let code = compressed[in_pos];
+        while in_pos < compressed.len() {
+            // out_pos can grow at most 8 bytes per iteration, and we start at 0
+            debug_assert!(out_pos <= decoded.capacity() - size_of::<Symbol>());
+            // SAFETY: in_pos is always in range 0..compressed.len()
+            let code = unsafe { *compressed.get_unchecked(in_pos) };
             if code == ESCAPE_CODE {
                 // Advance by one, do raw write.
                 in_pos += 1;
                 // SAFETY: out_pos is always 8 bytes or more from the end of decoded buffer
+                // SAFETY: ESCAPE_CODE can not be the last byte of the compressed stream
                 unsafe {
-                    let write_addr = ptr.byte_offset(out_pos as isize);
-                    std::ptr::write(write_addr, compressed[in_pos]);
+                    let write_addr = ptr.add(out_pos);
+                    std::ptr::write(write_addr, *compressed.get_unchecked(in_pos));
                 }
                 out_pos += 1;
                 in_pos += 1;
             } else {
-                let symbol = self.symbols[code as usize];
-                let length = self.lengths[code as usize];
+                // SAFETY: code is in range 0..255
+                // The symbol and length tables are both of length 256, so this is safe.
+                let symbol = unsafe { *self.symbols.get_unchecked(code as usize) };
+                let length = unsafe { *self.lengths.get_unchecked(code as usize) };
                 // SAFETY: out_pos is always 8 bytes or more from the end of decoded buffer
                 unsafe {
-                    let write_addr = ptr.byte_offset(out_pos as isize) as *mut u64;
+                    let write_addr = ptr.add(out_pos) as *mut u64;
                     // Perform 8 byte unaligned write.
                     write_addr.write_unaligned(symbol.as_u64());
                 }
