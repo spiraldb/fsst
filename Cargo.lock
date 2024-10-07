@@ -213,7 +213,7 @@ checksum = "60b1af1c220855b6ceac025d3f6ecdd2b7c4894bfe9cd9bda4fbb4bc7c0d4cf0"
 
 [[package]]
 name = "fsst-rs"
-version = "0.4.3"
+version = "0.4.4"
 dependencies = [
  "criterion",
  "curl",
