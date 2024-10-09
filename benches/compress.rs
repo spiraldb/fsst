@@ -82,6 +82,14 @@ fn bench_dbtext(c: &mut Criterion) {
             b.iter(|| unsafe { compressor.compress_into(&buf, &mut buffer) });
         });
 
+        unsafe {
+            compressor.compress_into(&buf, &mut buffer);
+        };
+        let decompressor = compressor.decompressor();
+        group.bench_function("decompress", |b| {
+            b.iter_with_large_drop(|| decompressor.decompress(&buffer));
+        });
+
         group.finish();
 
         // Report the compression factor for this dataset.
