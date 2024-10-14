@@ -6,6 +6,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.4](https://github.com/spiraldb/fsst/compare/v0.4.3...v0.4.4) - 2024-10-14
+
+### Added
+
+- add dbtext decompression benchmark ([#44](https://github.com/spiraldb/fsst/pull/44))
+
+### Other
+
+- *(deps)* lock file maintenance ([#46](https://github.com/spiraldb/fsst/pull/46))
+
 ## [0.4.3](https://github.com/spiraldb/fsst/compare/v0.4.2...v0.4.3) - 2024-10-03
 
 ### Added
