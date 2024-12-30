@@ -264,9 +264,12 @@ impl<'a> Decompressor<'a> {
     /// ## Panics
     ///
     /// If the decoded slice is not the same length as the `decompressed_capacity`.
-    pub fn decompress_into(&self, compressed: &[u8], decoded: &mut [MaybeUninit<u8>]) -> usize
-    {
-        assert_eq!(decoded.len(), self.decompressed_capacity(compressed), "decoded slice must have the same length as the decompressed capacity");
+    pub fn decompress_into(&self, compressed: &[u8], decoded: &mut [MaybeUninit<u8>]) -> usize {
+        assert_eq!(
+            decoded.len(),
+            self.decompressed_capacity(compressed),
+            "decoded slice must have the same length as the decompressed capacity"
+        );
         let ptr: *mut u8 = decoded.as_mut_ptr().cast();
 
         let mut in_pos = 0;
