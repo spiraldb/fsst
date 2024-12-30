@@ -1,3 +1,4 @@
+#![feature(maybe_uninit_write_slice)]
 #![doc = include_str!("../README.md")]
 #![cfg(target_endian = "little")]
 
@@ -10,6 +11,7 @@ macro_rules! assert_sizeof {
 
 use lossy_pht::LossyPHT;
 use std::fmt::{Debug, Formatter};
+use std::mem::MaybeUninit;
 
 mod builder;
 mod lossy_pht;
@@ -250,18 +252,32 @@ impl<'a> Decompressor<'a> {
         Self { symbols, lengths }
     }
 
+    /// Returns the capacity required for decompression.
+    pub fn decompressed_capacity(&self, compressed: &[u8]) -> usize {
+        size_of::<Symbol>() * (compressed.len() + 1)
+    }
+
     /// Decompress a byte slice that was previously returned by a compressor using
-    /// the same symbol table.
-    pub fn decompress(&self, compressed: &[u8]) -> Vec<u8> {
-        let mut decoded: Vec<u8> = Vec::with_capacity(size_of::<Symbol>() * (compressed.len() + 1));
+    /// the same symbol table into an uninitialized slice of bytes.
+    ///
+    /// Returns the length of the decoded bytes.
+    ///
+    /// ## Panics
+    ///
+    /// If the decoded slice is not the same length as the `decompressed_capacity`.
+    pub fn decompress_into(&self, compressed: &[u8], decoded: &mut [MaybeUninit<u8>]) -> usize {
+        assert_eq!(
+            decoded.len(),
+            self.decompressed_capacity(compressed),
+            "decoded slice must have the same length as the decompressed capacity"
+        );
         let ptr = decoded.as_mut_ptr();
 
         let mut in_pos = 0;
         let mut out_pos = 0;
 
         while in_pos < compressed.len() {
-            // out_pos can grow at most 8 bytes per iteration, and we start at 0
-            debug_assert!(out_pos <= decoded.capacity() - size_of::<Symbol>());
+            debug_assert!(out_pos <= decoded.len() - size_of::<Symbol>());
             // SAFETY: in_pos is always in range 0..compressed.len()
             let code = unsafe { *compressed.get_unchecked(in_pos) };
             if code == ESCAPE_CODE {
@@ -270,8 +286,9 @@ impl<'a> Decompressor<'a> {
                 // SAFETY: out_pos is always 8 bytes or more from the end of decoded buffer
                 // SAFETY: ESCAPE_CODE can not be the last byte of the compressed stream
                 unsafe {
-                    let write_addr = ptr.byte_add(out_pos);
-                    std::ptr::write(write_addr, *compressed.get_unchecked(in_pos));
+                    decoded
+                        .get_unchecked_mut(out_pos)
+                        .write(*compressed.get_unchecked(in_pos));
                 }
                 out_pos += 1;
                 in_pos += 1;
@@ -281,11 +298,10 @@ impl<'a> Decompressor<'a> {
                 let symbol = unsafe { *self.symbols.get_unchecked(code as usize) };
                 let length = unsafe { *self.lengths.get_unchecked(code as usize) };
                 // SAFETY: out_pos is always 8 bytes or more from the end of decoded buffer
-                unsafe {
-                    let write_addr = ptr.byte_add(out_pos) as *mut u64;
-                    // Perform 8 byte unaligned write.
-                    write_addr.write_unaligned(symbol.as_u64());
-                }
+                MaybeUninit::copy_from_slice(
+                    unsafe { decoded.get_unchecked_mut(out_pos..out_pos + length as usize) },
+                    &symbol.0.to_le_bytes()[0..length as usize],
+                );
                 in_pos += 1;
                 out_pos += length as usize;
             }
@@ -296,9 +312,15 @@ impl<'a> Decompressor<'a> {
             "decompression should exhaust input before output"
         );
 
-        // SAFETY: we enforce in the loop condition that out_pos <= decoded.capacity()
-        unsafe { decoded.set_len(out_pos) };
+        out_pos
+    }
 
+    /// Decompress a byte slice that was previously returned by a compressor using the same symbol
+    /// table into a new vector of bytes.
+    pub fn decompress(&self, compressed: &[u8]) -> Vec<u8> {
+        let mut decoded = Vec::with_capacity(self.decompressed_capacity(compressed));
+        let len = self.decompress_into(compressed, decoded.spare_capacity_mut());
+        unsafe { decoded.set_len(len) };
         decoded
     }
 }
