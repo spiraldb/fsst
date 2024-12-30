@@ -1,4 +1,3 @@
-#![feature(maybe_uninit_write_slice)]
 #![doc = include_str!("../README.md")]
 #![cfg(target_endian = "little")]
 
@@ -265,18 +264,16 @@ impl<'a> Decompressor<'a> {
     /// ## Panics
     ///
     /// If the decoded slice is not the same length as the `decompressed_capacity`.
-    pub fn decompress_into(&self, compressed: &[u8], decoded: &mut [MaybeUninit<u8>]) -> usize {
-        assert_eq!(
-            decoded.len(),
-            self.decompressed_capacity(compressed),
-            "decoded slice must have the same length as the decompressed capacity"
-        );
-        let ptr = decoded.as_mut_ptr();
+    pub fn decompress_into(&self, compressed: &[u8], decoded: &mut [MaybeUninit<u8>]) -> usize
+    {
+        assert_eq!(decoded.len(), self.decompressed_capacity(compressed), "decoded slice must have the same length as the decompressed capacity");
+        let ptr: *mut u8 = decoded.as_mut_ptr().cast();
 
         let mut in_pos = 0;
         let mut out_pos = 0;
 
         while in_pos < compressed.len() {
+            // out_pos can grow at most 8 bytes per iteration, and we start at 0
             debug_assert!(out_pos <= decoded.len() - size_of::<Symbol>());
             // SAFETY: in_pos is always in range 0..compressed.len()
             let code = unsafe { *compressed.get_unchecked(in_pos) };
@@ -286,9 +283,8 @@ impl<'a> Decompressor<'a> {
                 // SAFETY: out_pos is always 8 bytes or more from the end of decoded buffer
                 // SAFETY: ESCAPE_CODE can not be the last byte of the compressed stream
                 unsafe {
-                    decoded
-                        .get_unchecked_mut(out_pos)
-                        .write(*compressed.get_unchecked(in_pos));
+                    let write_addr = ptr.byte_add(out_pos);
+                    std::ptr::write(write_addr, *compressed.get_unchecked(in_pos));
                 }
                 out_pos += 1;
                 in_pos += 1;
@@ -298,10 +294,11 @@ impl<'a> Decompressor<'a> {
                 let symbol = unsafe { *self.symbols.get_unchecked(code as usize) };
                 let length = unsafe { *self.lengths.get_unchecked(code as usize) };
                 // SAFETY: out_pos is always 8 bytes or more from the end of decoded buffer
-                MaybeUninit::copy_from_slice(
-                    unsafe { decoded.get_unchecked_mut(out_pos..out_pos + length as usize) },
-                    &symbol.0.to_le_bytes()[0..length as usize],
-                );
+                unsafe {
+                    let write_addr = ptr.byte_add(out_pos) as *mut u64;
+                    // Perform 8 byte unaligned write.
+                    write_addr.write_unaligned(symbol.as_u64());
+                }
                 in_pos += 1;
                 out_pos += length as usize;
             }
