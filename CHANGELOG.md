@@ -6,6 +6,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.4](https://github.com/spiraldb/fsst/compare/v0.4.3...v0.4.4) - 2024-12-30
+
+### Added
+
+- add dbtext decompression benchmark (#44)
+
+### Other
+
+- Decode into an uninitialized byte slice ([#63](https://github.com/spiraldb/fsst/pull/63))
+- *(deps)* lock file maintenance (#62)
+- *(deps)* lock file maintenance (#60)
+- *(deps)* lock file maintenance (#59)
+- *(deps)* update mozilla-actions/sccache-action action to v0.0.7 (#58)
+- *(deps)* lock file maintenance (#57)
+- *(deps)* lock file maintenance (#56)
+- *(deps)* lock file maintenance (#55)
+- *(deps)* lock file maintenance (#54)
+- *(deps)* lock file maintenance (#53)
+- *(deps)* lock file maintenance (#50)
+- *(deps)* lock file maintenance (#49)
+- *(deps)* lock file maintenance (#47)
+- *(deps)* lock file maintenance (#46)
+
 ## [0.4.3](https://github.com/spiraldb/fsst/compare/v0.4.2...v0.4.3) - 2024-10-03
 
 ### Added
