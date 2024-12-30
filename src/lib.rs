@@ -251,8 +251,8 @@ impl<'a> Decompressor<'a> {
         Self { symbols, lengths }
     }
 
-    /// Returns the capacity required for decompression.
-    pub fn decompressed_capacity(&self, compressed: &[u8]) -> usize {
+    /// Returns an upper bound on the size of the decompressed data.
+    pub fn max_decompression_capacity(&self, compressed: &[u8]) -> usize {
         size_of::<Symbol>() * (compressed.len() + 1)
     }
 
@@ -267,7 +267,7 @@ impl<'a> Decompressor<'a> {
     pub fn decompress_into(&self, compressed: &[u8], decoded: &mut [MaybeUninit<u8>]) -> usize {
         assert_eq!(
             decoded.len(),
-            self.decompressed_capacity(compressed),
+            self.max_decompression_capacity(compressed),
             "decoded slice must have the same length as the decompressed capacity"
         );
         let ptr: *mut u8 = decoded.as_mut_ptr().cast();
@@ -318,7 +318,7 @@ impl<'a> Decompressor<'a> {
     /// Decompress a byte slice that was previously returned by a compressor using the same symbol
     /// table into a new vector of bytes.
     pub fn decompress(&self, compressed: &[u8]) -> Vec<u8> {
-        let mut decoded = Vec::with_capacity(self.decompressed_capacity(compressed));
+        let mut decoded = Vec::with_capacity(self.max_decompression_capacity(compressed));
         let len = self.decompress_into(compressed, decoded.spare_capacity_mut());
         unsafe { decoded.set_len(len) };
         decoded
