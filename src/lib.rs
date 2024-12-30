@@ -10,6 +10,7 @@ macro_rules! assert_sizeof {
 
 use lossy_pht::LossyPHT;
 use std::fmt::{Debug, Formatter};
+use std::mem::MaybeUninit;
 
 mod builder;
 mod lossy_pht;
@@ -250,18 +251,33 @@ impl<'a> Decompressor<'a> {
         Self { symbols, lengths }
     }
 
+    /// Returns an upper bound on the size of the decompressed data.
+    pub fn max_decompression_capacity(&self, compressed: &[u8]) -> usize {
+        size_of::<Symbol>() * (compressed.len() + 1)
+    }
+
     /// Decompress a byte slice that was previously returned by a compressor using
-    /// the same symbol table.
-    pub fn decompress(&self, compressed: &[u8]) -> Vec<u8> {
-        let mut decoded: Vec<u8> = Vec::with_capacity(size_of::<Symbol>() * (compressed.len() + 1));
-        let ptr = decoded.as_mut_ptr();
+    /// the same symbol table into an uninitialized slice of bytes.
+    ///
+    /// Returns the length of the decoded bytes.
+    ///
+    /// ## Panics
+    ///
+    /// If the decoded slice is not the same length as the `decompressed_capacity`.
+    pub fn decompress_into(&self, compressed: &[u8], decoded: &mut [MaybeUninit<u8>]) -> usize {
+        assert_eq!(
+            decoded.len(),
+            self.max_decompression_capacity(compressed),
+            "decoded slice must have the same length as the decompressed capacity"
+        );
+        let ptr: *mut u8 = decoded.as_mut_ptr().cast();
 
         let mut in_pos = 0;
         let mut out_pos = 0;
 
         while in_pos < compressed.len() {
             // out_pos can grow at most 8 bytes per iteration, and we start at 0
-            debug_assert!(out_pos <= decoded.capacity() - size_of::<Symbol>());
+            debug_assert!(out_pos <= decoded.len() - size_of::<Symbol>());
             // SAFETY: in_pos is always in range 0..compressed.len()
             let code = unsafe { *compressed.get_unchecked(in_pos) };
             if code == ESCAPE_CODE {
@@ -296,9 +312,15 @@ impl<'a> Decompressor<'a> {
             "decompression should exhaust input before output"
         );
 
-        // SAFETY: we enforce in the loop condition that out_pos <= decoded.capacity()
-        unsafe { decoded.set_len(out_pos) };
+        out_pos
+    }
 
+    /// Decompress a byte slice that was previously returned by a compressor using the same symbol
+    /// table into a new vector of bytes.
+    pub fn decompress(&self, compressed: &[u8]) -> Vec<u8> {
+        let mut decoded = Vec::with_capacity(self.max_decompression_capacity(compressed));
+        let len = self.decompress_into(compressed, decoded.spare_capacity_mut());
+        unsafe { decoded.set_len(len) };
         decoded
     }
 }
