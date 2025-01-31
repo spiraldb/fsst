@@ -292,6 +292,13 @@ impl<'a> Decompressor<'a> {
         compressed: &[u8],
         decoded: &mut [MaybeUninit<u8>],
     ) -> usize {
+        // Ensure the target buffer is at least half the size of the input buffer.
+        // This is the theortical smallest a valid target can be, and occurs when
+        // every input code is an escape.
+        assert!(
+            decoded.len() >= compressed.len() / 2,
+            "decoded is smaller than lower-bound decompressed size"
+        );
         let ptr: *mut u8 = decoded.as_mut_ptr().cast();
 
         let mut in_pos = 0;
