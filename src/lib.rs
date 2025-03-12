@@ -351,12 +351,22 @@ impl<'a> Decompressor<'a> {
                             store_next_symbol!(code);
                             let code = ((next_block >> 8) & 0xFF) as u8;
                             store_next_symbol!(code);
-                            in_ptr = in_ptr.add(2);
+
+                            let escaped = ((next_block >> 24) & 0xFF) as u8;
+                            out_ptr.write(escaped);
+                            out_ptr = out_ptr.add(1);
+
+                            in_ptr = in_ptr.add(4);
                         },
                         1 => {
                             let code = (next_block & 0xFF) as u8;
                             store_next_symbol!(code);
-                            in_ptr = in_ptr.add(1);
+
+                            let escaped = ((next_block >> 16) & 0xFF) as u8;
+                            out_ptr.write(escaped);
+                            out_ptr = out_ptr.add(1);
+
+                            in_ptr = in_ptr.add(3);
                         },
                         0 => {
                             // Otherwise, we actually need to decompress the next byte
