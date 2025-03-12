@@ -315,157 +315,160 @@ impl<'a> Decompressor<'a> {
             }
 
             // First we try loading 8 bytes at a time.
-            let block_out_end = out_end.sub(8 * size_of::<Symbol>());
-            let block_in_end = in_end.sub(8);
+            if decoded.len() >= 8 * size_of::<Symbol>() && compressed.len() >= 8 {
+                // Extract the loop condition since the compiler fails to do so
+                let block_out_end = out_end.sub(8 * size_of::<Symbol>());
+                let block_in_end = in_end.sub(8);
 
-            while out_ptr.cast_const() <= block_out_end && in_ptr < block_in_end {
-                // Note that we load a little-endian u64 here.
-                let next_block = in_ptr.cast::<u64>().read_unaligned();
-                let escape_mask = (next_block & 0x8080808080808080)
-                    & ((((!next_block) & 0x7F7F7F7F7F7F7F7F) + 0x7F7F7F7F7F7F7F7F)
+                while out_ptr.cast_const() <= block_out_end && in_ptr < block_in_end {
+                    // Note that we load a little-endian u64 here.
+                    let next_block = in_ptr.cast::<u64>().read_unaligned();
+                    let escape_mask = (next_block & 0x8080808080808080)
+                        & ((((!next_block) & 0x7F7F7F7F7F7F7F7F) + 0x7F7F7F7F7F7F7F7F)
                         ^ 0x8080808080808080);
 
-                // If there are no escape codes, we write each symbol one by one.
-                if escape_mask == 0 {
-                    let code = (next_block & 0xFF) as u8;
-                    store_next_symbol!(code);
-                    let code = ((next_block >> 8) & 0xFF) as u8;
-                    store_next_symbol!(code);
-                    let code = ((next_block >> 16) & 0xFF) as u8;
-                    store_next_symbol!(code);
-                    let code = ((next_block >> 24) & 0xFF) as u8;
-                    store_next_symbol!(code);
-                    let code = ((next_block >> 32) & 0xFF) as u8;
-                    store_next_symbol!(code);
-                    let code = ((next_block >> 40) & 0xFF) as u8;
-                    store_next_symbol!(code);
-                    let code = ((next_block >> 48) & 0xFF) as u8;
-                    store_next_symbol!(code);
-                    let code = ((next_block >> 56) & 0xFF) as u8;
-                    store_next_symbol!(code);
-                    in_ptr = in_ptr.add(8);
-                } else {
-                    // Otherwise, find the first escape code and write the symbols up to that point.
-                    let first_escape_pos = escape_mask.trailing_zeros() >> 3;
-                    debug_assert!(first_escape_pos < 8);
-                    match first_escape_pos {
-                        7 => {
-                            let code = (next_block & 0xFF) as u8;
-                            store_next_symbol!(code);
-                            let code = ((next_block >> 8) & 0xFF) as u8;
-                            store_next_symbol!(code);
-                            let code = ((next_block >> 16) & 0xFF) as u8;
-                            store_next_symbol!(code);
-                            let code = ((next_block >> 24) & 0xFF) as u8;
-                            store_next_symbol!(code);
-                            let code = ((next_block >> 32) & 0xFF) as u8;
-                            store_next_symbol!(code);
-                            let code = ((next_block >> 40) & 0xFF) as u8;
-                            store_next_symbol!(code);
-                            let code = ((next_block >> 48) & 0xFF) as u8;
-                            store_next_symbol!(code);
+                    // If there are no escape codes, we write each symbol one by one.
+                    if escape_mask == 0 {
+                        let code = (next_block & 0xFF) as u8;
+                        store_next_symbol!(code);
+                        let code = ((next_block >> 8) & 0xFF) as u8;
+                        store_next_symbol!(code);
+                        let code = ((next_block >> 16) & 0xFF) as u8;
+                        store_next_symbol!(code);
+                        let code = ((next_block >> 24) & 0xFF) as u8;
+                        store_next_symbol!(code);
+                        let code = ((next_block >> 32) & 0xFF) as u8;
+                        store_next_symbol!(code);
+                        let code = ((next_block >> 40) & 0xFF) as u8;
+                        store_next_symbol!(code);
+                        let code = ((next_block >> 48) & 0xFF) as u8;
+                        store_next_symbol!(code);
+                        let code = ((next_block >> 56) & 0xFF) as u8;
+                        store_next_symbol!(code);
+                        in_ptr = in_ptr.add(8);
+                    } else {
+                        // Otherwise, find the first escape code and write the symbols up to that point.
+                        let first_escape_pos = escape_mask.trailing_zeros() >> 3; // Divide bits to bytes
+                        debug_assert!(first_escape_pos < 8);
+                        match first_escape_pos {
+                            7 => {
+                                let code = (next_block & 0xFF) as u8;
+                                store_next_symbol!(code);
+                                let code = ((next_block >> 8) & 0xFF) as u8;
+                                store_next_symbol!(code);
+                                let code = ((next_block >> 16) & 0xFF) as u8;
+                                store_next_symbol!(code);
+                                let code = ((next_block >> 24) & 0xFF) as u8;
+                                store_next_symbol!(code);
+                                let code = ((next_block >> 32) & 0xFF) as u8;
+                                store_next_symbol!(code);
+                                let code = ((next_block >> 40) & 0xFF) as u8;
+                                store_next_symbol!(code);
+                                let code = ((next_block >> 48) & 0xFF) as u8;
+                                store_next_symbol!(code);
 
-                            in_ptr = in_ptr.add(7);
+                                in_ptr = in_ptr.add(7);
+                            }
+                            6 => {
+                                let code = (next_block & 0xFF) as u8;
+                                store_next_symbol!(code);
+                                let code = ((next_block >> 8) & 0xFF) as u8;
+                                store_next_symbol!(code);
+                                let code = ((next_block >> 16) & 0xFF) as u8;
+                                store_next_symbol!(code);
+                                let code = ((next_block >> 24) & 0xFF) as u8;
+                                store_next_symbol!(code);
+                                let code = ((next_block >> 32) & 0xFF) as u8;
+                                store_next_symbol!(code);
+                                let code = ((next_block >> 40) & 0xFF) as u8;
+                                store_next_symbol!(code);
+
+                                let escaped = ((next_block >> 56) & 0xFF) as u8;
+                                out_ptr.write(escaped);
+                                out_ptr = out_ptr.add(1);
+
+                                in_ptr = in_ptr.add(8);
+                            }
+                            5 => {
+                                let code = (next_block & 0xFF) as u8;
+                                store_next_symbol!(code);
+                                let code = ((next_block >> 8) & 0xFF) as u8;
+                                store_next_symbol!(code);
+                                let code = ((next_block >> 16) & 0xFF) as u8;
+                                store_next_symbol!(code);
+                                let code = ((next_block >> 24) & 0xFF) as u8;
+                                store_next_symbol!(code);
+                                let code = ((next_block >> 32) & 0xFF) as u8;
+                                store_next_symbol!(code);
+
+                                let escaped = ((next_block >> 48) & 0xFF) as u8;
+                                out_ptr.write(escaped);
+                                out_ptr = out_ptr.add(1);
+
+                                in_ptr = in_ptr.add(7);
+                            }
+                            4 => {
+                                let code = (next_block & 0xFF) as u8;
+                                store_next_symbol!(code);
+                                let code = ((next_block >> 8) & 0xFF) as u8;
+                                store_next_symbol!(code);
+                                let code = ((next_block >> 16) & 0xFF) as u8;
+                                store_next_symbol!(code);
+                                let code = ((next_block >> 24) & 0xFF) as u8;
+                                store_next_symbol!(code);
+
+                                let escaped = ((next_block >> 40) & 0xFF) as u8;
+                                out_ptr.write(escaped);
+                                out_ptr = out_ptr.add(1);
+
+                                in_ptr = in_ptr.add(6);
+                            }
+                            3 => {
+                                let code = (next_block & 0xFF) as u8;
+                                store_next_symbol!(code);
+                                let code = ((next_block >> 8) & 0xFF) as u8;
+                                store_next_symbol!(code);
+                                let code = ((next_block >> 16) & 0xFF) as u8;
+                                store_next_symbol!(code);
+
+                                let escaped = ((next_block >> 32) & 0xFF) as u8;
+                                out_ptr.write(escaped);
+                                out_ptr = out_ptr.add(1);
+
+                                in_ptr = in_ptr.add(5);
+                            }
+                            2 => {
+                                let code = (next_block & 0xFF) as u8;
+                                store_next_symbol!(code);
+                                let code = ((next_block >> 8) & 0xFF) as u8;
+                                store_next_symbol!(code);
+
+                                let escaped = ((next_block >> 24) & 0xFF) as u8;
+                                out_ptr.write(escaped);
+                                out_ptr = out_ptr.add(1);
+
+                                in_ptr = in_ptr.add(4);
+                            }
+                            1 => {
+                                let code = (next_block & 0xFF) as u8;
+                                store_next_symbol!(code);
+
+                                let escaped = ((next_block >> 16) & 0xFF) as u8;
+                                out_ptr.write(escaped);
+                                out_ptr = out_ptr.add(1);
+
+                                in_ptr = in_ptr.add(3);
+                            }
+                            0 => {
+                                // Otherwise, we actually need to decompress the next byte
+                                // Extract the second byte from the u32
+                                let escaped = ((next_block >> 8) & 0xFF) as u8;
+                                in_ptr = in_ptr.add(2);
+                                out_ptr.write(escaped);
+                                out_ptr = out_ptr.add(1);
+                            }
+                            _ => unreachable!(),
                         }
-                        6 => {
-                            let code = (next_block & 0xFF) as u8;
-                            store_next_symbol!(code);
-                            let code = ((next_block >> 8) & 0xFF) as u8;
-                            store_next_symbol!(code);
-                            let code = ((next_block >> 16) & 0xFF) as u8;
-                            store_next_symbol!(code);
-                            let code = ((next_block >> 24) & 0xFF) as u8;
-                            store_next_symbol!(code);
-                            let code = ((next_block >> 32) & 0xFF) as u8;
-                            store_next_symbol!(code);
-                            let code = ((next_block >> 40) & 0xFF) as u8;
-                            store_next_symbol!(code);
-
-                            let escaped = ((next_block >> 56) & 0xFF) as u8;
-                            out_ptr.write(escaped);
-                            out_ptr = out_ptr.add(1);
-
-                            in_ptr = in_ptr.add(8);
-                        }
-                        5 => {
-                            let code = (next_block & 0xFF) as u8;
-                            store_next_symbol!(code);
-                            let code = ((next_block >> 8) & 0xFF) as u8;
-                            store_next_symbol!(code);
-                            let code = ((next_block >> 16) & 0xFF) as u8;
-                            store_next_symbol!(code);
-                            let code = ((next_block >> 24) & 0xFF) as u8;
-                            store_next_symbol!(code);
-                            let code = ((next_block >> 32) & 0xFF) as u8;
-                            store_next_symbol!(code);
-
-                            let escaped = ((next_block >> 48) & 0xFF) as u8;
-                            out_ptr.write(escaped);
-                            out_ptr = out_ptr.add(1);
-
-                            in_ptr = in_ptr.add(7);
-                        }
-                        4 => {
-                            let code = (next_block & 0xFF) as u8;
-                            store_next_symbol!(code);
-                            let code = ((next_block >> 8) & 0xFF) as u8;
-                            store_next_symbol!(code);
-                            let code = ((next_block >> 16) & 0xFF) as u8;
-                            store_next_symbol!(code);
-                            let code = ((next_block >> 24) & 0xFF) as u8;
-                            store_next_symbol!(code);
-
-                            let escaped = ((next_block >> 40) & 0xFF) as u8;
-                            out_ptr.write(escaped);
-                            out_ptr = out_ptr.add(1);
-
-                            in_ptr = in_ptr.add(6);
-                        }
-                        3 => {
-                            let code = (next_block & 0xFF) as u8;
-                            store_next_symbol!(code);
-                            let code = ((next_block >> 8) & 0xFF) as u8;
-                            store_next_symbol!(code);
-                            let code = ((next_block >> 16) & 0xFF) as u8;
-                            store_next_symbol!(code);
-
-                            let escaped = ((next_block >> 32) & 0xFF) as u8;
-                            out_ptr.write(escaped);
-                            out_ptr = out_ptr.add(1);
-
-                            in_ptr = in_ptr.add(5);
-                        }
-                        2 => {
-                            let code = (next_block & 0xFF) as u8;
-                            store_next_symbol!(code);
-                            let code = ((next_block >> 8) & 0xFF) as u8;
-                            store_next_symbol!(code);
-
-                            let escaped = ((next_block >> 24) & 0xFF) as u8;
-                            out_ptr.write(escaped);
-                            out_ptr = out_ptr.add(1);
-
-                            in_ptr = in_ptr.add(4);
-                        }
-                        1 => {
-                            let code = (next_block & 0xFF) as u8;
-                            store_next_symbol!(code);
-
-                            let escaped = ((next_block >> 16) & 0xFF) as u8;
-                            out_ptr.write(escaped);
-                            out_ptr = out_ptr.add(1);
-
-                            in_ptr = in_ptr.add(3);
-                        }
-                        0 => {
-                            // Otherwise, we actually need to decompress the next byte
-                            // Extract the second byte from the u32
-                            let escaped = ((next_block >> 8) & 0xFF) as u8;
-                            in_ptr = in_ptr.add(2);
-                            out_ptr.write(escaped);
-                            out_ptr = out_ptr.add(1);
-                        }
-                        _ => unreachable!(),
                     }
                 }
             }
