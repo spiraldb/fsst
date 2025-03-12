@@ -285,11 +285,7 @@ impl<'a> Decompressor<'a> {
     /// unsafe { decompressed.set_len(len) };
     /// assert_eq!(&decompressed, "helloooo".as_bytes());
     /// ```
-    pub fn decompress_into(
-        &self,
-        compressed: &[u8],
-        decoded: &mut [MaybeUninit<u8>],
-    ) -> usize {
+    pub fn decompress_into(&self, compressed: &[u8], decoded: &mut [MaybeUninit<u8>]) -> usize {
         // Ensure the target buffer is at least half the size of the input buffer.
         // This is the theortical smallest a valid target can be, and occurs when
         // every input code is an escape.
@@ -308,7 +304,10 @@ impl<'a> Decompressor<'a> {
 
         while in_pos < compressed.len() {
             // out_pos can grow at most 8 bytes per iteration, and we start at 0
-            assert!(out_pos <= decoded_end, "Insufficient space in output buffer");
+            assert!(
+                out_pos <= decoded_end,
+                "Insufficient space in output buffer"
+            );
 
             // SAFETY: in_pos is always in range 0..compressed.len()
             let code = unsafe { *compressed.get_unchecked(in_pos) };
