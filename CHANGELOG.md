@@ -6,6 +6,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1](https://github.com/spiraldb/fsst/compare/v0.5.0...v0.5.1) - 2025-03-12
+
+### Other
+
+- Decompress in 8-byte blocks ([#82](https://github.com/spiraldb/fsst/pull/82))
+- *(deps)* lock file maintenance ([#83](https://github.com/spiraldb/fsst/pull/83))
+- Assert enough room in decoded buffer ([#79](https://github.com/spiraldb/fsst/pull/79))
+- *(deps)* update rust crate criterion to v2.9.1 ([#80](https://github.com/spiraldb/fsst/pull/80))
+- *(deps)* update mozilla-actions/sccache-action action to v0.0.8 ([#78](https://github.com/spiraldb/fsst/pull/78))
+- *(deps)* lock file maintenance ([#77](https://github.com/spiraldb/fsst/pull/77))
+- Add codspeed ([#76](https://github.com/spiraldb/fsst/pull/76))
+
 ## [0.5.0](https://github.com/spiraldb/fsst/compare/v0.4.4...v0.5.0) - 2025-01-31
 
 ### Added
