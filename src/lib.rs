@@ -307,7 +307,9 @@ impl<'a> Decompressor<'a> {
 
             macro_rules! store_next_symbol {
                 ($code:expr) => {{
-                    out_ptr.cast::<u64>().write_unaligned(self.symbols.get_unchecked($code as usize).as_u64());
+                    out_ptr
+                        .cast::<u64>()
+                        .write_unaligned(self.symbols.get_unchecked($code as usize).as_u64());
                     out_ptr = out_ptr.add(*self.lengths.get_unchecked($code as usize) as usize);
                 }};
             }
@@ -319,7 +321,8 @@ impl<'a> Decompressor<'a> {
             while out_ptr.cast_const() <= block_out_end && in_ptr < block_in_end {
                 // Note that we load a little-endian u32 here.
                 let next_block = in_ptr.cast::<u32>().read_unaligned();
-                let escape_mask = (next_block & 0x80808080) & ((((!next_block)&0x7F7F7F7F)+0x7F7F7F7F)^0x80808080);
+                let escape_mask = (next_block & 0x80808080)
+                    & ((((!next_block) & 0x7F7F7F7F) + 0x7F7F7F7F) ^ 0x80808080);
 
                 // If there are no escape codes, we write each symbol one by one.
                 if escape_mask == 0 {
@@ -345,7 +348,7 @@ impl<'a> Decompressor<'a> {
                             let code = ((next_block >> 16) & 0xFF) as u8;
                             store_next_symbol!(code);
                             in_ptr = in_ptr.add(3);
-                        },
+                        }
                         2 => {
                             let code = (next_block & 0xFF) as u8;
                             store_next_symbol!(code);
@@ -357,7 +360,7 @@ impl<'a> Decompressor<'a> {
                             out_ptr = out_ptr.add(1);
 
                             in_ptr = in_ptr.add(4);
-                        },
+                        }
                         1 => {
                             let code = (next_block & 0xFF) as u8;
                             store_next_symbol!(code);
@@ -367,7 +370,7 @@ impl<'a> Decompressor<'a> {
                             out_ptr = out_ptr.add(1);
 
                             in_ptr = in_ptr.add(3);
-                        },
+                        }
                         0 => {
                             // Otherwise, we actually need to decompress the next byte
                             // Extract the second byte from the u32
@@ -375,8 +378,8 @@ impl<'a> Decompressor<'a> {
                             in_ptr = in_ptr.add(2);
                             out_ptr.write(escaped);
                             out_ptr = out_ptr.add(1);
-                        },
-                        _ => unreachable!()
+                        }
+                        _ => unreachable!(),
                     }
                 }
             }
