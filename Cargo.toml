@@ -25,9 +25,6 @@ tests_outside_test_module = { level = "deny" }
 unwrap_in_result = { level = "deny" }
 use_debug = { level = "deny" }
 
-[dependencies]
-seq-macro = "0.3.6"
-
 [dev-dependencies]
 criterion = { package = "codspeed-criterion-compat", version = "2.8" }
 curl = "0.4"
