@@ -266,7 +266,6 @@ impl<'a> Decompressor<'a> {
     ///
     /// If the caller fails to provide sufficient capacity in the decoded buffer. An upper bound
     /// on the required capacity can be obtained by calling [`Self::max_decompression_capacity`].
-    /// Note that the capacity must be the decompressed size plus 7 bytes.
     ///
     /// ## Example
     ///
