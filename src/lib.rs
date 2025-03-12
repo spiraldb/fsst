@@ -280,14 +280,12 @@ impl<'a> Decompressor<'a> {
     ///
     /// let mut decompressed = Vec::with_capacity(8 + 7);
     ///
-    /// unsafe {
-    ///     let len = decompressor.decompress_into(&[0], decompressed.spare_capacity_mut());
-    ///     assert_eq!(len, 8);
-    ///     decompressed.set_len(len);
-    /// }
+    /// let len = decompressor.decompress_into(&[0], decompressed.spare_capacity_mut());
+    /// assert_eq!(len, 8);
+    /// unsafe { decompressed.set_len(len) };
     /// assert_eq!(&decompressed, "helloooo".as_bytes());
     /// ```
-    pub unsafe fn decompress_into(
+    pub fn decompress_into(
         &self,
         compressed: &[u8],
         decoded: &mut [MaybeUninit<u8>],
@@ -306,7 +304,8 @@ impl<'a> Decompressor<'a> {
 
         while in_pos < compressed.len() {
             // out_pos can grow at most 8 bytes per iteration, and we start at 0
-            debug_assert!(out_pos <= decoded.len() - size_of::<Symbol>());
+            assert!(out_pos + size_of::<Symbol>() <= decoded.len(), "Insufficient space in output buffer");
+
             // SAFETY: in_pos is always in range 0..compressed.len()
             let code = unsafe { *compressed.get_unchecked(in_pos) };
             if code == ESCAPE_CODE {
@@ -349,8 +348,8 @@ impl<'a> Decompressor<'a> {
     pub fn decompress(&self, compressed: &[u8]) -> Vec<u8> {
         let mut decoded = Vec::with_capacity(self.max_decompression_capacity(compressed) + 7);
 
-        // SAFETY: we allocate the maximum decompression memory possible for decoded.
-        let len = unsafe { self.decompress_into(compressed, decoded.spare_capacity_mut()) };
+        let len = self.decompress_into(compressed, decoded.spare_capacity_mut());
+        // SAFETY: len bytes have now been initialized by the decompressor.
         unsafe { decoded.set_len(len) };
         decoded
     }
