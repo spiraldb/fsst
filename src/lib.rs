@@ -1,3 +1,4 @@
+#![feature(ptr_sub_ptr)]
 #![doc = include_str!("../README.md")]
 #![cfg(target_endian = "little")]
 
@@ -265,6 +266,7 @@ impl<'a> Decompressor<'a> {
     ///
     /// If the caller fails to provide sufficient capacity in the decoded buffer. An upper bound
     /// on the required capacity can be obtained by calling [`Self::max_decompression_capacity`].
+    /// Note that the capacity must be the decompressed size plus 7 bytes.
     ///
     /// ## Example
     ///
@@ -293,58 +295,84 @@ impl<'a> Decompressor<'a> {
             decoded.len() >= compressed.len() / 2,
             "decoded is smaller than lower-bound decompressed size"
         );
-        let ptr: *mut u8 = decoded.as_mut_ptr().cast();
 
-        // We need to assert that `out_pos + size_of::<Symbol>() < decoded.len()`, so we hoist
-        // out `decoded.len() - size_of::<Symbol>()` into a variable.
-        let decoded_end = decoded.len() - size_of::<Symbol>();
+        unsafe {
+            let mut in_ptr = compressed.as_ptr();
+            let in_end = in_ptr.add(compressed.len());
 
-        let mut in_pos = 0;
-        let mut out_pos = 0;
+            let mut out_ptr: *mut u8 = decoded.as_mut_ptr().cast();
+            let out_begin = out_ptr.cast_const();
+            let out_end = decoded.as_ptr().add(decoded.len()).cast::<u8>();
 
-        while in_pos < compressed.len() {
-            // out_pos can grow at most 8 bytes per iteration, and we start at 0
-            assert!(
-                out_pos <= decoded_end,
-                "Insufficient space in output buffer"
+            let store_next_symbol = || {
+                let code = in_ptr.read() as usize;
+                in_ptr = in_ptr.add(1);
+                out_ptr.cast::<u64>().write_unaligned(self.symbols.get_unchecked(code).as_u64());
+                out_ptr = out_ptr.add(*self.lengths.get_unchecked(code) as usize);
+            };
+
+            // First we try loading 4 bytes at a time.
+            while out_ptr.add(4 * size_of::<Symbol>()).cast_const() <= out_end && in_ptr.add(4) < in_end {
+                let next_block = in_ptr.cast::<u32>().read_unaligned();
+                let escape_mask = (next_block & 0x80808080) & ((((!next_block)&0x7F7F7F7F)+0x7F7F7F7F)^0x80808080);
+
+                // If there are no escape codes, we write each symbol one by one.
+                if escape_mask == 0 {
+                    store_next_symbol();
+                    store_next_symbol();
+                    store_next_symbol();
+                    store_next_symbol();
+                } else {
+                    // Otherwise, find the first escape code and write the symbols up to that point.
+                    let first_escape_pos = escape_mask.trailing_zeros() >> 3;
+                    debug_assert!(first_escape_pos < 4);
+                    match first_escape_pos {
+                        3 => {
+                            store_next_symbol();
+                            store_next_symbol();
+                            store_next_symbol();
+                        },
+                        2 => {
+                            store_next_symbol();
+                            store_next_symbol();
+                        },
+                        1 => {
+                            store_next_symbol();
+                        },
+                        0 => {
+                            // Otherwise, we actually need to decompress the next byte
+                            // Extract the second byte from the u32
+                            let escaped = ((next_block >> 8) & 0xFF) as u8;
+                            in_ptr = in_ptr.add(1);
+                            out_ptr.write(escaped);
+                            out_ptr = out_ptr.add(1);
+                        },
+                        _ => unreachable!()
+                    }
+                }
+            }
+
+            // Otherwise, fall back to 1-byte reads.
+            while out_ptr.add(size_of::<Symbol>()).cast_const() <= out_end && in_ptr < in_end {
+                let code = in_ptr.read();
+                in_ptr = in_ptr.add(1);
+
+                if code == ESCAPE_CODE {
+                    out_ptr.write(in_ptr.read());
+                    in_ptr = in_ptr.add(1);
+                    out_ptr = out_ptr.add(1);
+                } else {
+                    store_next_symbol()
+                }
+            }
+
+            assert_eq!(
+                in_ptr, in_end,
+                "decompression should exhaust input before output"
             );
 
-            // SAFETY: in_pos is always in range 0..compressed.len()
-            let code = unsafe { *compressed.get_unchecked(in_pos) };
-            if code == ESCAPE_CODE {
-                // Advance by one, do raw write.
-                in_pos += 1;
-                // SAFETY: out_pos is always 8 bytes or more from the end of decoded buffer
-                // SAFETY: ESCAPE_CODE can not be the last byte of the compressed stream
-                unsafe {
-                    let write_addr = ptr.byte_add(out_pos);
-                    std::ptr::write(write_addr, *compressed.get_unchecked(in_pos));
-                }
-                out_pos += 1;
-                in_pos += 1;
-            } else {
-                // SAFETY: code is in range 0..255
-                // The symbol and length tables are both of length 256, so this is safe.
-                let symbol = unsafe { *self.symbols.get_unchecked(code as usize) };
-                let length = unsafe { *self.lengths.get_unchecked(code as usize) };
-
-                // SAFETY: out_pos is always 8 bytes or more from the end of decoded buffer
-                unsafe {
-                    let write_addr = ptr.byte_add(out_pos) as *mut u64;
-                    // Perform 8 byte unaligned write.
-                    write_addr.write_unaligned(symbol.as_u64());
-                }
-                out_pos += length as usize;
-                in_pos += 1;
-            }
+            out_end.sub_ptr(out_begin)
         }
-
-        assert!(
-            in_pos >= compressed.len(),
-            "decompression should exhaust input before output"
-        );
-
-        out_pos
     }
 
     /// Decompress a byte slice that was previously returned by a compressor using the same symbol
