@@ -298,18 +298,24 @@ impl<'a> Decompressor<'a> {
 
         unsafe {
             let mut in_ptr = compressed.as_ptr();
+            let _in_begin = in_ptr;
             let in_end = in_ptr.add(compressed.len());
 
             let mut out_ptr: *mut u8 = decoded.as_mut_ptr().cast();
             let out_begin = out_ptr.cast_const();
             let out_end = decoded.as_ptr().add(decoded.len()).cast::<u8>();
 
-            let store_next_symbol = || {
-                let code = in_ptr.read() as usize;
-                in_ptr = in_ptr.add(1);
-                out_ptr.cast::<u64>().write_unaligned(self.symbols.get_unchecked(code).as_u64());
-                out_ptr = out_ptr.add(*self.lengths.get_unchecked(code) as usize);
-            };
+            macro_rules! store_next_symbol {
+                () => {{
+                    let code = in_ptr.read() as usize;
+                    in_ptr = in_ptr.add(1);
+                    if code > self.symbols.len() - 1 {
+                        panic!("invalid code: {}", code);
+                    }
+                    out_ptr.cast::<u64>().write_unaligned(self.symbols.get_unchecked(code).as_u64());
+                    out_ptr = out_ptr.add(*self.lengths.get_unchecked(code) as usize);
+                }};
+            }
 
             // First we try loading 4 bytes at a time.
             while out_ptr.add(4 * size_of::<Symbol>()).cast_const() <= out_end && in_ptr.add(4) < in_end {
@@ -318,32 +324,32 @@ impl<'a> Decompressor<'a> {
 
                 // If there are no escape codes, we write each symbol one by one.
                 if escape_mask == 0 {
-                    store_next_symbol();
-                    store_next_symbol();
-                    store_next_symbol();
-                    store_next_symbol();
+                    store_next_symbol!();
+                    store_next_symbol!();
+                    store_next_symbol!();
+                    store_next_symbol!();
                 } else {
                     // Otherwise, find the first escape code and write the symbols up to that point.
                     let first_escape_pos = escape_mask.trailing_zeros() >> 3;
                     debug_assert!(first_escape_pos < 4);
                     match first_escape_pos {
                         3 => {
-                            store_next_symbol();
-                            store_next_symbol();
-                            store_next_symbol();
+                            store_next_symbol!();
+                            store_next_symbol!();
+                            store_next_symbol!();
                         },
                         2 => {
-                            store_next_symbol();
-                            store_next_symbol();
+                            store_next_symbol!();
+                            store_next_symbol!();
                         },
                         1 => {
-                            store_next_symbol();
+                            store_next_symbol!();
                         },
                         0 => {
                             // Otherwise, we actually need to decompress the next byte
                             // Extract the second byte from the u32
                             let escaped = ((next_block >> 8) & 0xFF) as u8;
-                            in_ptr = in_ptr.add(1);
+                            in_ptr = in_ptr.add(2);
                             out_ptr.write(escaped);
                             out_ptr = out_ptr.add(1);
                         },
@@ -362,7 +368,8 @@ impl<'a> Decompressor<'a> {
                     in_ptr = in_ptr.add(1);
                     out_ptr = out_ptr.add(1);
                 } else {
-                    store_next_symbol()
+                    out_ptr.cast::<u64>().write_unaligned(self.symbols.get_unchecked(code as usize).as_u64());
+                    out_ptr = out_ptr.add(*self.lengths.get_unchecked(code as usize) as usize);
                 }
             }
 
@@ -371,7 +378,7 @@ impl<'a> Decompressor<'a> {
                 "decompression should exhaust input before output"
             );
 
-            out_end.sub_ptr(out_begin)
+            out_ptr.sub_ptr(out_begin)
         }
     }
 
