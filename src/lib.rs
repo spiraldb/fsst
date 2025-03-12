@@ -306,44 +306,57 @@ impl<'a> Decompressor<'a> {
             let out_end = decoded.as_ptr().add(decoded.len()).cast::<u8>();
 
             macro_rules! store_next_symbol {
-                () => {{
-                    let code = in_ptr.read() as usize;
-                    in_ptr = in_ptr.add(1);
-                    if code > self.symbols.len() - 1 {
-                        panic!("invalid code: {}", code);
-                    }
-                    out_ptr.cast::<u64>().write_unaligned(self.symbols.get_unchecked(code).as_u64());
-                    out_ptr = out_ptr.add(*self.lengths.get_unchecked(code) as usize);
+                ($code:expr) => {{
+                    out_ptr.cast::<u64>().write_unaligned(self.symbols.get_unchecked($code as usize).as_u64());
+                    out_ptr = out_ptr.add(*self.lengths.get_unchecked($code as usize) as usize);
                 }};
             }
 
             // First we try loading 4 bytes at a time.
-            while out_ptr.add(4 * size_of::<Symbol>()).cast_const() <= out_end && in_ptr.add(4) < in_end {
+            let block_out_end = out_end.sub(4 * size_of::<Symbol>());
+            let block_in_end = in_end.sub(4);
+
+            while out_ptr.cast_const() <= block_out_end && in_ptr < block_in_end {
+                // Note that we load a little-endian u32 here.
                 let next_block = in_ptr.cast::<u32>().read_unaligned();
                 let escape_mask = (next_block & 0x80808080) & ((((!next_block)&0x7F7F7F7F)+0x7F7F7F7F)^0x80808080);
 
                 // If there are no escape codes, we write each symbol one by one.
                 if escape_mask == 0 {
-                    store_next_symbol!();
-                    store_next_symbol!();
-                    store_next_symbol!();
-                    store_next_symbol!();
+                    let code = (next_block & 0xFF) as u8;
+                    store_next_symbol!(code);
+                    let code = ((next_block >> 8) & 0xFF) as u8;
+                    store_next_symbol!(code);
+                    let code = ((next_block >> 16) & 0xFF) as u8;
+                    store_next_symbol!(code);
+                    let code = ((next_block >> 24) & 0xFF) as u8;
+                    store_next_symbol!(code);
+                    in_ptr = in_ptr.add(4);
                 } else {
                     // Otherwise, find the first escape code and write the symbols up to that point.
                     let first_escape_pos = escape_mask.trailing_zeros() >> 3;
                     debug_assert!(first_escape_pos < 4);
                     match first_escape_pos {
                         3 => {
-                            store_next_symbol!();
-                            store_next_symbol!();
-                            store_next_symbol!();
+                            let code = (next_block & 0xFF) as u8;
+                            store_next_symbol!(code);
+                            let code = ((next_block >> 8) & 0xFF) as u8;
+                            store_next_symbol!(code);
+                            let code = ((next_block >> 16) & 0xFF) as u8;
+                            store_next_symbol!(code);
+                            in_ptr = in_ptr.add(3);
                         },
                         2 => {
-                            store_next_symbol!();
-                            store_next_symbol!();
+                            let code = (next_block & 0xFF) as u8;
+                            store_next_symbol!(code);
+                            let code = ((next_block >> 8) & 0xFF) as u8;
+                            store_next_symbol!(code);
+                            in_ptr = in_ptr.add(2);
                         },
                         1 => {
-                            store_next_symbol!();
+                            let code = (next_block & 0xFF) as u8;
+                            store_next_symbol!(code);
+                            in_ptr = in_ptr.add(1);
                         },
                         0 => {
                             // Otherwise, we actually need to decompress the next byte
@@ -368,8 +381,7 @@ impl<'a> Decompressor<'a> {
                     in_ptr = in_ptr.add(1);
                     out_ptr = out_ptr.add(1);
                 } else {
-                    out_ptr.cast::<u64>().write_unaligned(self.symbols.get_unchecked(code as usize).as_u64());
-                    out_ptr = out_ptr.add(*self.lengths.get_unchecked(code as usize) as usize);
+                    store_next_symbol!(code);
                 }
             }
 
