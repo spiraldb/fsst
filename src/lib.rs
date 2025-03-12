@@ -1,4 +1,3 @@
-#![feature(ptr_sub_ptr)]
 #![doc = include_str!("../README.md")]
 #![cfg(target_endian = "little")]
 
@@ -473,7 +472,7 @@ impl<'a> Decompressor<'a> {
             }
 
             // Otherwise, fall back to 1-byte reads.
-            while out_ptr.add(size_of::<Symbol>()).cast_const() <= out_end && in_ptr < in_end {
+            while out_end.offset_from(out_ptr) > size_of::<Symbol>() as isize && in_ptr < in_end {
                 let code = in_ptr.read();
                 in_ptr = in_ptr.add(1);
 
@@ -491,7 +490,7 @@ impl<'a> Decompressor<'a> {
                 "decompression should exhaust input before output"
             );
 
-            out_ptr.sub_ptr(out_begin)
+            out_ptr.offset_from(out_begin) as usize
         }
     }
 
@@ -772,4 +771,26 @@ pub(crate) fn advance_8byte_word(word: u64, bytes: usize) -> u64 {
 pub(crate) fn compare_masked(left: u64, right: u64, ignored_bits: u16) -> bool {
     let mask = u64::MAX >> ignored_bits;
     (left & mask) == right
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    #[test]
+    fn test_stuff() {
+        let compressor = {
+            let mut builder = CompressorBuilder::new();
+            builder.insert(Symbol::from_slice(b"helloooo"), 8);
+            builder.build()
+        };
+
+        let decompressor = compressor.decompressor();
+
+        let mut decompressed = Vec::with_capacity(8 + 7);
+
+        let len = decompressor.decompress_into(&[0], decompressed.spare_capacity_mut());
+        assert_eq!(len, 8);
+        unsafe { decompressed.set_len(len) };
+        assert_eq!(&decompressed, "helloooo".as_bytes());
+    }
 }
