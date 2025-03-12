@@ -325,7 +325,7 @@ impl<'a> Decompressor<'a> {
                     let next_block = in_ptr.cast::<u64>().read_unaligned();
                     let escape_mask = (next_block & 0x8080808080808080)
                         & ((((!next_block) & 0x7F7F7F7F7F7F7F7F) + 0x7F7F7F7F7F7F7F7F)
-                        ^ 0x8080808080808080);
+                            ^ 0x8080808080808080);
 
                     // If there are no escape codes, we write each symbol one by one.
                     if escape_mask == 0 {
