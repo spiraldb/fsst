@@ -1,8 +1,8 @@
 use std::fmt::Debug;
 
-use crate::builder::fsst_hash;
 use crate::Code;
 use crate::Symbol;
+use crate::builder::fsst_hash;
 
 /// Size of the perfect hash table.
 ///

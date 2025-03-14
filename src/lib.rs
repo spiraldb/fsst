@@ -1,4 +1,4 @@
-#![feature(iter_repeat_n)]
+#![allow(unsafe_op_in_unsafe_fn)]
 #![doc = include_str!("../README.md")]
 #![cfg(target_endian = "little")]
 
@@ -63,11 +63,7 @@ impl Symbol {
         // Special case handling of a symbol with all-zeros. This is actually
         // a 1-byte symbol containing 0x00.
         let len = size_of::<Self>() - null_bytes;
-        if len == 0 {
-            1
-        } else {
-            len
-        }
+        if len == 0 { 1 } else { len }
     }
 
     #[inline]
@@ -705,7 +701,10 @@ impl Compressor {
         }
 
         // in_ptr should have exceeded in_end
-        assert!(in_ptr >= in_end, "exhausted output buffer before exhausting input, there is a bug in SymbolTable::compress()");
+        assert!(
+            in_ptr >= in_end,
+            "exhausted output buffer before exhausting input, there is a bug in SymbolTable::compress()"
+        );
 
         // Count the number of bytes written
         // SAFETY: assertion
@@ -752,6 +751,76 @@ impl Compressor {
     pub fn symbol_lengths(&self) -> &[u8] {
         &self.lengths[0..self.n_symbols as usize]
     }
+
+    /// Rebuild a compressor from an existing symbol table.
+    ///
+    /// This will not attempt to optimize or re-order the codes.
+    pub fn rebuild_from(symbols: impl AsRef<[Symbol]>, symbol_lens: impl AsRef<[u8]>) -> Self {
+        let symbols = symbols.as_ref();
+        let symbol_lens = symbol_lens.as_ref();
+
+        assert_eq!(
+            symbols.len(),
+            symbol_lens.len(),
+            "symbols and lengths differ"
+        );
+        assert!(symbols.len() <= 254, "symbol table len must be <= 254");
+        validate_symbol_order(symbol_lens);
+
+        // Insert the symbols in their given order into the FSST lookup structures.
+        let symbols = symbols.to_vec();
+        let lengths = symbol_lens.to_vec();
+        let mut lossy_pht = LossyPHT::new();
+
+        // Initialize the codes_two_byte table.
+        let mut codes_two_byte = Vec::with_capacity(65_535);
+        for tb in 0..=(255 * 255) {
+            codes_two_byte.push(Code::new_escape(tb as u8));
+        }
+
+        // Insert all of the one-byte symbols first.
+        for (code, (&symbol, &len)) in symbols.iter().zip(lengths.iter()).enumerate() {
+            if len == 1 {
+                codes_two_byte[symbol.first_byte() as usize] = Code::new_symbol(code as u8, 1);
+            }
+        }
+
+        // Insert all of the two-byte symbols over the one-byte
+        for (code, (&symbol, &len)) in symbols.iter().zip(lengths.iter()).enumerate() {
+            if len == 2 {
+                codes_two_byte[symbol.first2() as usize] = Code::new_symbol(code as u8, 2);
+            }
+        }
+
+        // Insert the 3+ byte symbols into the Lossy PHT
+        for (code, (&symbol, &len)) in symbols.iter().zip(lengths.iter()).enumerate() {
+            if len >= 3 {
+                lossy_pht.insert(symbol, len as usize, code as u8);
+            }
+        }
+
+        // Find the position of the first code that has a suffix later in the table
+        let mut has_suffix_code = symbols.len() as u8;
+        for (code, (&symbol, &len)) in symbols.iter().zip(lengths.iter()).enumerate() {
+            if len != 2 {
+                break;
+            }
+            let rest = &symbols[code..];
+            if rest.iter().any(|&other| symbol.first2() == other.first2()) {
+                has_suffix_code = code as u8;
+                break;
+            }
+        }
+
+        Compressor {
+            n_symbols: symbols.len() as u8,
+            symbols,
+            lengths,
+            codes_two_byte,
+            lossy_pht,
+            has_suffix_code,
+        }
+    }
 }
 
 #[inline]
@@ -761,10 +830,30 @@ pub(crate) fn advance_8byte_word(word: u64, bytes: usize) -> u64 {
     //
     // Note that even though this looks like it branches, Rust compiles this to a
     // conditional move instruction. See `<https://godbolt.org/z/Pbvre65Pq>`
-    if bytes == 8 {
-        0
-    } else {
-        word >> (8 * bytes)
+    if bytes == 8 { 0 } else { word >> (8 * bytes) }
+}
+
+fn validate_symbol_order(symbol_lens: &[u8]) {
+    // Ensure that the symbol table is ordered by length, 23456781
+    let mut expected = 2;
+    for (idx, &len) in symbol_lens.iter().enumerate() {
+        if expected == 1 {
+            assert_eq!(
+                len, 1,
+                "symbol code={idx} should be one byte, was {len} bytes"
+            );
+        } else {
+            if len == 1 {
+                expected = 1;
+            }
+
+            // we're in the non-zero portion.
+            assert!(
+                len >= expected,
+                "symbol code={idx} breaks violates FSST symbol table ordering"
+            );
+            expected = len;
+        }
     }
 }
 
@@ -777,6 +866,7 @@ pub(crate) fn compare_masked(left: u64, right: u64, ignored_bits: u16) -> bool {
 #[cfg(test)]
 mod test {
     use super::*;
+    use std::{iter, mem};
     #[test]
     fn test_stuff() {
         let compressor = {
@@ -793,5 +883,58 @@ mod test {
         assert_eq!(len, 8);
         unsafe { decompressed.set_len(len) };
         assert_eq!(&decompressed, "helloooo".as_bytes());
+    }
+
+    #[test]
+    fn test_symbols_good() {
+        let symbols_u64: &[u64] = &[
+            24931, 25698, 25442, 25699, 25186, 25444, 24932, 25188, 25185, 25441, 25697, 25700,
+            24929, 24930, 25443, 25187, 6513249, 6512995, 6578786, 6513761, 6513507, 6382434,
+            6579042, 6512994, 6447460, 6447969, 6382178, 6579041, 6512993, 6448226, 6513250,
+            6579297, 6513506, 6447459, 6513764, 6447458, 6578529, 6382180, 6513762, 6447714,
+            6579299, 6513508, 6382436, 6513763, 6578532, 6381924, 6448228, 6579300, 6381921,
+            6382690, 6382179, 6447713, 6447972, 6513505, 6447457, 6382692, 6513252, 6578785,
+            6578787, 6578531, 6448225, 6382177, 6382433, 6578530, 6448227, 6381922, 6578788,
+            6579044, 6382691, 6512996, 6579043, 6579298, 6447970, 6447716, 6447971, 6381923,
+            6447715, 97, 98, 100, 99, 97, 98, 99, 100,
+        ];
+        let symbols: &[Symbol] = unsafe { mem::transmute(symbols_u64) };
+        let lens: Vec<u8> = iter::repeat_n(2u8, 16)
+            .chain(iter::repeat_n(3u8, 61))
+            .chain(iter::repeat_n(1u8, 8))
+            .collect();
+
+        let compressor = Compressor::rebuild_from(symbols, lens);
+        let built_symbols: &[u64] = unsafe { mem::transmute(compressor.symbol_table()) };
+        assert_eq!(built_symbols, symbols_u64);
+    }
+
+    #[should_panic(expected = "assertion `left == right` failed")]
+    #[test]
+    fn test_symbols_bad() {
+        let symbols: &[u64] = &[
+            24931, 25698, 25442, 25699, 25186, 25444, 24932, 25188, 25185, 25441, 25697, 25700,
+            24929, 24930, 25443, 25187, 6513249, 6512995, 6578786, 6513761, 6513507, 6382434,
+            6579042, 6512994, 6447460, 6447969, 6382178, 6579041, 6512993, 6448226, 6513250,
+            6579297, 6513506, 6447459, 6513764, 6447458, 6578529, 6382180, 6513762, 6447714,
+            6579299, 6513508, 6382436, 6513763, 6578532, 6381924, 6448228, 6579300, 6381921,
+            6382690, 6382179, 6447713, 6447972, 6513505, 6447457, 6382692, 6513252, 6578785,
+            6578787, 6578531, 6448225, 6382177, 6382433, 6578530, 6448227, 6381922, 6578788,
+            6579044, 6382691, 6512996, 6579043, 6579298, 6447970, 6447716, 6447971, 6381923,
+            6447715, 97, 98, 100, 99, 97, 98, 99, 100,
+        ];
+        let lens: Vec<u8> = iter::repeat_n(2u8, 16)
+            .chain(iter::repeat_n(3u8, 61))
+            .chain(iter::repeat_n(1u8, 8))
+            .collect();
+
+        let mut builder = CompressorBuilder::new();
+        for (symbol, len) in symbols.iter().zip(lens.iter()) {
+            let symbol = Symbol::from_slice(&symbol.to_le_bytes());
+            builder.insert(symbol, *len as usize);
+        }
+        let compressor = builder.build();
+        let built_symbols: &[u64] = unsafe { mem::transmute(compressor.symbol_table()) };
+        assert_eq!(built_symbols, symbols);
     }
 }
