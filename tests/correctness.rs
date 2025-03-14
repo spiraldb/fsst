@@ -1,3 +1,5 @@
+//! Correctness tests for FSST.
+
 #![cfg(test)]
 
 use fsst::{Compressor, CompressorBuilder, Symbol};
