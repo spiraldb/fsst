@@ -1,3 +1,4 @@
+#![feature(iter_repeat_n)]
 #![doc = include_str!("../README.md")]
 #![cfg(target_endian = "little")]
 
