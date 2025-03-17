@@ -282,10 +282,8 @@ impl CompressorBuilder {
         }
 
         // Fill codes_two_byte with pseudocode of first byte
-        for byte1 in 0..=255 {
-            for _byte2 in 0..=255 {
-                table.codes_two_byte.push(Code::new_escape(byte1));
-            }
+        for idx in 0..=65_535 {
+            table.codes_two_byte.push(Code::new_escape(idx as u8));
         }
 
         table
@@ -477,8 +475,7 @@ impl CompressorBuilder {
                 self.codes_two_byte[two_bytes] = Code::new_symbol(new_code, 2);
             } else {
                 // The one-byte code for the given code number here...
-                let new_code = self.codes_one_byte[two_bytes as u8 as usize];
-                self.codes_two_byte[two_bytes] = new_code;
+                self.codes_two_byte[two_bytes] = self.codes_one_byte[two_bytes & 0xFF];
             }
         }
 

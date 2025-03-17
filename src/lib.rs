@@ -764,7 +764,11 @@ impl Compressor {
             symbol_lens.len(),
             "symbols and lengths differ"
         );
-        assert!(symbols.len() <= 254, "symbol table len must be <= 254");
+        assert!(
+            symbols.len() <= 255,
+            "symbol table len must be <= 255, was {}",
+            symbols.len()
+        );
         validate_symbol_order(symbol_lens);
 
         // Insert the symbols in their given order into the FSST lookup structures.
@@ -772,41 +776,56 @@ impl Compressor {
         let lengths = symbol_lens.to_vec();
         let mut lossy_pht = LossyPHT::new();
 
-        // Initialize the codes_two_byte table.
-        let mut codes_two_byte = Vec::with_capacity(65_535);
-        for tb in 0..=(255 * 255) {
-            codes_two_byte.push(Code::new_escape(tb as u8));
-        }
+        let mut codes_one_byte = vec![Code::UNUSED; 256];
 
-        // Insert all of the one-byte symbols first.
+        // Insert all of the one byte symbols first.
         for (code, (&symbol, &len)) in symbols.iter().zip(lengths.iter()).enumerate() {
             if len == 1 {
-                codes_two_byte[symbol.first_byte() as usize] = Code::new_symbol(code as u8, 1);
+                codes_one_byte[symbol.first_byte() as usize] = Code::new_symbol(code as u8, 1);
             }
         }
 
-        // Insert all of the two-byte symbols over the one-byte
+        // Initialize the codes_two_byte table to be all escapes
+        let mut codes_two_byte = vec![Code::UNUSED; 65_536];
+
+        // Insert the two byte symbols, possibly overwriting slots for one-byte symbols and escapes.
         for (code, (&symbol, &len)) in symbols.iter().zip(lengths.iter()).enumerate() {
-            if len == 2 {
-                codes_two_byte[symbol.first2() as usize] = Code::new_symbol(code as u8, 2);
+            match len {
+                2 => {
+                    codes_two_byte[symbol.first2() as usize] =
+                        Code::new_symbol_building(code as u8, 2);
+                }
+                3.. => {
+                    assert!(
+                        lossy_pht.insert(symbol, len as usize, code as u8),
+                        "rebuild symbol insertion into PHT must succeed"
+                    );
+                }
+                _ => { /* Covered by the 1-byte loop above. */ }
             }
         }
 
-        // Insert the 3+ byte symbols into the Lossy PHT
-        for (code, (&symbol, &len)) in symbols.iter().zip(lengths.iter()).enumerate() {
-            if len >= 3 {
-                lossy_pht.insert(symbol, len as usize, code as u8);
+        // Build the finished codes_two_byte table, subbing in unused positions with the
+        // codes_one_byte value similar to what we do in CompressBuilder::finalize.
+        for (symbol, code) in codes_two_byte.iter_mut().enumerate() {
+            if *code == Code::UNUSED {
+                *code = codes_one_byte[symbol & 0xFF];
+            } else {
+                *code = Code::new_symbol(code.code(), 2);
             }
         }
 
-        // Find the position of the first code that has a suffix later in the table
+        // Find the position of the first 2-byte code that has a suffix later in the table
         let mut has_suffix_code = symbols.len() as u8;
         for (code, (&symbol, &len)) in symbols.iter().zip(lengths.iter()).enumerate() {
             if len != 2 {
                 break;
             }
             let rest = &symbols[code..];
-            if rest.iter().any(|&other| symbol.first2() == other.first2()) {
+            if rest
+                .iter()
+                .any(|&other| other.len() > 2 && symbol.first2() == other.first2())
+            {
                 has_suffix_code = code as u8;
                 break;
             }
