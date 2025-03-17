@@ -1,4 +1,3 @@
-#![allow(unsafe_op_in_unsafe_fn)]
 #![doc = include_str!("../README.md")]
 #![cfg(target_endian = "little")]
 
@@ -569,14 +568,16 @@ impl Compressor {
         //
         // SAFETY: caller ensures out_ptr is not null
         let first_byte = word as u8;
-        out_ptr.byte_add(1).write_unaligned(first_byte);
+        // SAFETY: out_ptr is not null
+        unsafe { out_ptr.byte_add(1).write_unaligned(first_byte) };
 
         // First, check the two_bytes table
         let code_twobyte = self.codes_two_byte[word as u16 as usize];
 
         if code_twobyte.code() < self.has_suffix_code {
             // 2 byte code without having to worry about longer matches.
-            std::ptr::write(out_ptr, code_twobyte.code());
+            // SAFETY: out_ptr is not null.
+            unsafe { std::ptr::write(out_ptr, code_twobyte.code()) };
 
             // Advance input by symbol length (2) and output by a single code byte
             (2, 1)
@@ -590,10 +591,12 @@ impl Compressor {
                 && compare_masked(word, entry.symbol.as_u64(), ignored_bits)
             {
                 // Advance the input by the symbol length (variable) and the output by one code byte
-                std::ptr::write(out_ptr, entry.code.code());
+                // SAFETY: out_ptr is not null.
+                unsafe { std::ptr::write(out_ptr, entry.code.code()) };
                 (entry.code.len() as usize, 1)
             } else {
-                std::ptr::write(out_ptr, code_twobyte.code());
+                // SAFETY: out_ptr is not null
+                unsafe { std::ptr::write(out_ptr, code_twobyte.code()) };
 
                 // Advance the input by the symbol length (variable) and the output by either 1
                 // byte (if was one-byte code) or two bytes (escape).
@@ -687,15 +690,19 @@ impl Compressor {
         // but shift data out of this word rather than advancing an input pointer and potentially reading
         // unowned memory.
         let mut bytes = [0u8; 8];
-        std::ptr::copy_nonoverlapping(in_ptr, bytes.as_mut_ptr(), remaining_bytes);
+        // SAFETY: remaining_bytes <= 8
+        unsafe { std::ptr::copy_nonoverlapping(in_ptr, bytes.as_mut_ptr(), remaining_bytes) };
         let mut last_word = u64::from_le_bytes(bytes);
 
         while in_ptr < in_end && out_ptr < out_end {
             // Load a full 8-byte word of data from in_ptr.
-            // SAFETY: caller asserts in_ptr is not null. we may read past end of pointer though.
-            let (advance_in, advance_out) = self.compress_word(last_word, out_ptr);
-            in_ptr = in_ptr.byte_add(advance_in);
-            out_ptr = out_ptr.byte_add(advance_out);
+            // SAFETY: caller asserts in_ptr is not null
+            let (advance_in, advance_out) = unsafe { self.compress_word(last_word, out_ptr) };
+            // SAFETY: pointer ranges are checked in the loop condition
+            unsafe {
+                in_ptr = in_ptr.add(advance_in);
+                out_ptr = out_ptr.add(advance_out);
+            }
 
             last_word = advance_8byte_word(last_word, advance_in);
         }
@@ -706,15 +713,17 @@ impl Compressor {
             "exhausted output buffer before exhausting input, there is a bug in SymbolTable::compress()"
         );
 
-        // Count the number of bytes written
-        // SAFETY: assertion
-        let bytes_written = out_ptr.offset_from(values.as_ptr());
+        assert!(out_ptr <= out_end, "output buffer sized too small");
+
+        // SAFETY: out_ptr is derived from the `values` allocation.
+        let bytes_written = unsafe { out_ptr.offset_from(values.as_ptr()) };
         assert!(
             bytes_written >= 0,
             "out_ptr ended before it started, not possible"
         );
 
-        values.set_len(bytes_written as usize);
+        // SAFETY: we have initialized `bytes_written` values in the output buffer.
+        unsafe { values.set_len(bytes_written as usize) };
     }
 
     /// Use the symbol table to compress the plaintext into a sequence of codes and escapes.
