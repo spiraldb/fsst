@@ -6,6 +6,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.2](https://github.com/spiraldb/fsst/compare/v0.5.1...v0.5.2) - 2025-03-17
+
+### Added
+
+- add rebuild from existing function ([#84](https://github.com/spiraldb/fsst/pull/84))
+
 ## [0.5.1](https://github.com/spiraldb/fsst/compare/v0.5.0...v0.5.1) - 2025-03-12
 
 ### Other
