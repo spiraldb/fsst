@@ -5,7 +5,7 @@ description = "Pure-Rust implementation of Fast Static Symbol Tables algorithm f
 authors = ["SpiralDB Developers <hello@spiraldb.com>"]
 license = "Apache-2.0"
 repository = "https://github.com/spiraldb/fsst"
-edition = "2021"
+edition = "2024"
 
 [lib]
 name = "fsst"

@@ -62,11 +62,7 @@ impl Symbol {
         // Special case handling of a symbol with all-zeros. This is actually
         // a 1-byte symbol containing 0x00.
         let len = size_of::<Self>() - null_bytes;
-        if len == 0 {
-            1
-        } else {
-            len
-        }
+        if len == 0 { 1 } else { len }
     }
 
     #[inline]
@@ -572,14 +568,16 @@ impl Compressor {
         //
         // SAFETY: caller ensures out_ptr is not null
         let first_byte = word as u8;
-        out_ptr.byte_add(1).write_unaligned(first_byte);
+        // SAFETY: out_ptr is not null
+        unsafe { out_ptr.byte_add(1).write_unaligned(first_byte) };
 
         // First, check the two_bytes table
         let code_twobyte = self.codes_two_byte[word as u16 as usize];
 
         if code_twobyte.code() < self.has_suffix_code {
             // 2 byte code without having to worry about longer matches.
-            std::ptr::write(out_ptr, code_twobyte.code());
+            // SAFETY: out_ptr is not null.
+            unsafe { std::ptr::write(out_ptr, code_twobyte.code()) };
 
             // Advance input by symbol length (2) and output by a single code byte
             (2, 1)
@@ -593,10 +591,12 @@ impl Compressor {
                 && compare_masked(word, entry.symbol.as_u64(), ignored_bits)
             {
                 // Advance the input by the symbol length (variable) and the output by one code byte
-                std::ptr::write(out_ptr, entry.code.code());
+                // SAFETY: out_ptr is not null.
+                unsafe { std::ptr::write(out_ptr, entry.code.code()) };
                 (entry.code.len() as usize, 1)
             } else {
-                std::ptr::write(out_ptr, code_twobyte.code());
+                // SAFETY: out_ptr is not null
+                unsafe { std::ptr::write(out_ptr, code_twobyte.code()) };
 
                 // Advance the input by the symbol length (variable) and the output by either 1
                 // byte (if was one-byte code) or two bytes (escape).
@@ -690,31 +690,40 @@ impl Compressor {
         // but shift data out of this word rather than advancing an input pointer and potentially reading
         // unowned memory.
         let mut bytes = [0u8; 8];
-        std::ptr::copy_nonoverlapping(in_ptr, bytes.as_mut_ptr(), remaining_bytes);
+        // SAFETY: remaining_bytes <= 8
+        unsafe { std::ptr::copy_nonoverlapping(in_ptr, bytes.as_mut_ptr(), remaining_bytes) };
         let mut last_word = u64::from_le_bytes(bytes);
 
         while in_ptr < in_end && out_ptr < out_end {
             // Load a full 8-byte word of data from in_ptr.
-            // SAFETY: caller asserts in_ptr is not null. we may read past end of pointer though.
-            let (advance_in, advance_out) = self.compress_word(last_word, out_ptr);
-            in_ptr = in_ptr.byte_add(advance_in);
-            out_ptr = out_ptr.byte_add(advance_out);
+            // SAFETY: caller asserts in_ptr is not null
+            let (advance_in, advance_out) = unsafe { self.compress_word(last_word, out_ptr) };
+            // SAFETY: pointer ranges are checked in the loop condition
+            unsafe {
+                in_ptr = in_ptr.add(advance_in);
+                out_ptr = out_ptr.add(advance_out);
+            }
 
             last_word = advance_8byte_word(last_word, advance_in);
         }
 
         // in_ptr should have exceeded in_end
-        assert!(in_ptr >= in_end, "exhausted output buffer before exhausting input, there is a bug in SymbolTable::compress()");
+        assert!(
+            in_ptr >= in_end,
+            "exhausted output buffer before exhausting input, there is a bug in SymbolTable::compress()"
+        );
 
-        // Count the number of bytes written
-        // SAFETY: assertion
-        let bytes_written = out_ptr.offset_from(values.as_ptr());
+        assert!(out_ptr <= out_end, "output buffer sized too small");
+
+        // SAFETY: out_ptr is derived from the `values` allocation.
+        let bytes_written = unsafe { out_ptr.offset_from(values.as_ptr()) };
         assert!(
             bytes_written >= 0,
             "out_ptr ended before it started, not possible"
         );
 
-        values.set_len(bytes_written as usize);
+        // SAFETY: we have initialized `bytes_written` values in the output buffer.
+        unsafe { values.set_len(bytes_written as usize) };
     }
 
     /// Use the symbol table to compress the plaintext into a sequence of codes and escapes.
@@ -751,6 +760,92 @@ impl Compressor {
     pub fn symbol_lengths(&self) -> &[u8] {
         &self.lengths[0..self.n_symbols as usize]
     }
+
+    /// Rebuild a compressor from an existing symbol table.
+    ///
+    /// This will not attempt to optimize or re-order the codes.
+    pub fn rebuild_from(symbols: impl AsRef<[Symbol]>, symbol_lens: impl AsRef<[u8]>) -> Self {
+        let symbols = symbols.as_ref();
+        let symbol_lens = symbol_lens.as_ref();
+
+        assert_eq!(
+            symbols.len(),
+            symbol_lens.len(),
+            "symbols and lengths differ"
+        );
+        assert!(
+            symbols.len() <= 255,
+            "symbol table len must be <= 255, was {}",
+            symbols.len()
+        );
+        validate_symbol_order(symbol_lens);
+
+        // Insert the symbols in their given order into the FSST lookup structures.
+        let symbols = symbols.to_vec();
+        let lengths = symbol_lens.to_vec();
+        let mut lossy_pht = LossyPHT::new();
+
+        let mut codes_one_byte = vec![Code::UNUSED; 256];
+
+        // Insert all of the one byte symbols first.
+        for (code, (&symbol, &len)) in symbols.iter().zip(lengths.iter()).enumerate() {
+            if len == 1 {
+                codes_one_byte[symbol.first_byte() as usize] = Code::new_symbol(code as u8, 1);
+            }
+        }
+
+        // Initialize the codes_two_byte table to be all escapes
+        let mut codes_two_byte = vec![Code::UNUSED; 65_536];
+
+        // Insert the two byte symbols, possibly overwriting slots for one-byte symbols and escapes.
+        for (code, (&symbol, &len)) in symbols.iter().zip(lengths.iter()).enumerate() {
+            match len {
+                2 => {
+                    codes_two_byte[symbol.first2() as usize] = Code::new_symbol(code as u8, 2);
+                }
+                3.. => {
+                    assert!(
+                        lossy_pht.insert(symbol, len as usize, code as u8),
+                        "rebuild symbol insertion into PHT must succeed"
+                    );
+                }
+                _ => { /* Covered by the 1-byte loop above. */ }
+            }
+        }
+
+        // Build the finished codes_two_byte table, subbing in unused positions with the
+        // codes_one_byte value similar to what we do in CompressBuilder::finalize.
+        for (symbol, code) in codes_two_byte.iter_mut().enumerate() {
+            if *code == Code::UNUSED {
+                *code = codes_one_byte[symbol & 0xFF];
+            }
+        }
+
+        // Find the position of the first 2-byte code that has a suffix later in the table
+        let mut has_suffix_code = 0u8;
+        for (code, (&symbol, &len)) in symbols.iter().zip(lengths.iter()).enumerate() {
+            if len != 2 {
+                break;
+            }
+            let rest = &symbols[code..];
+            if rest
+                .iter()
+                .any(|&other| other.len() > 2 && symbol.first2() == other.first2())
+            {
+                has_suffix_code = code as u8;
+                break;
+            }
+        }
+
+        Compressor {
+            n_symbols: symbols.len() as u8,
+            symbols,
+            lengths,
+            codes_two_byte,
+            lossy_pht,
+            has_suffix_code,
+        }
+    }
 }
 
 #[inline]
@@ -760,10 +855,30 @@ pub(crate) fn advance_8byte_word(word: u64, bytes: usize) -> u64 {
     //
     // Note that even though this looks like it branches, Rust compiles this to a
     // conditional move instruction. See `<https://godbolt.org/z/Pbvre65Pq>`
-    if bytes == 8 {
-        0
-    } else {
-        word >> (8 * bytes)
+    if bytes == 8 { 0 } else { word >> (8 * bytes) }
+}
+
+fn validate_symbol_order(symbol_lens: &[u8]) {
+    // Ensure that the symbol table is ordered by length, 23456781
+    let mut expected = 2;
+    for (idx, &len) in symbol_lens.iter().enumerate() {
+        if expected == 1 {
+            assert_eq!(
+                len, 1,
+                "symbol code={idx} should be one byte, was {len} bytes"
+            );
+        } else {
+            if len == 1 {
+                expected = 1;
+            }
+
+            // we're in the non-zero portion.
+            assert!(
+                len >= expected,
+                "symbol code={idx} breaks violates FSST symbol table ordering"
+            );
+            expected = len;
+        }
     }
 }
 
@@ -776,6 +891,7 @@ pub(crate) fn compare_masked(left: u64, right: u64, ignored_bits: u16) -> bool {
 #[cfg(test)]
 mod test {
     use super::*;
+    use std::{iter, mem};
     #[test]
     fn test_stuff() {
         let compressor = {
@@ -792,5 +908,58 @@ mod test {
         assert_eq!(len, 8);
         unsafe { decompressed.set_len(len) };
         assert_eq!(&decompressed, "helloooo".as_bytes());
+    }
+
+    #[test]
+    fn test_symbols_good() {
+        let symbols_u64: &[u64] = &[
+            24931, 25698, 25442, 25699, 25186, 25444, 24932, 25188, 25185, 25441, 25697, 25700,
+            24929, 24930, 25443, 25187, 6513249, 6512995, 6578786, 6513761, 6513507, 6382434,
+            6579042, 6512994, 6447460, 6447969, 6382178, 6579041, 6512993, 6448226, 6513250,
+            6579297, 6513506, 6447459, 6513764, 6447458, 6578529, 6382180, 6513762, 6447714,
+            6579299, 6513508, 6382436, 6513763, 6578532, 6381924, 6448228, 6579300, 6381921,
+            6382690, 6382179, 6447713, 6447972, 6513505, 6447457, 6382692, 6513252, 6578785,
+            6578787, 6578531, 6448225, 6382177, 6382433, 6578530, 6448227, 6381922, 6578788,
+            6579044, 6382691, 6512996, 6579043, 6579298, 6447970, 6447716, 6447971, 6381923,
+            6447715, 97, 98, 100, 99, 97, 98, 99, 100,
+        ];
+        let symbols: &[Symbol] = unsafe { mem::transmute(symbols_u64) };
+        let lens: Vec<u8> = iter::repeat_n(2u8, 16)
+            .chain(iter::repeat_n(3u8, 61))
+            .chain(iter::repeat_n(1u8, 8))
+            .collect();
+
+        let compressor = Compressor::rebuild_from(symbols, lens);
+        let built_symbols: &[u64] = unsafe { mem::transmute(compressor.symbol_table()) };
+        assert_eq!(built_symbols, symbols_u64);
+    }
+
+    #[should_panic(expected = "assertion `left == right` failed")]
+    #[test]
+    fn test_symbols_bad() {
+        let symbols: &[u64] = &[
+            24931, 25698, 25442, 25699, 25186, 25444, 24932, 25188, 25185, 25441, 25697, 25700,
+            24929, 24930, 25443, 25187, 6513249, 6512995, 6578786, 6513761, 6513507, 6382434,
+            6579042, 6512994, 6447460, 6447969, 6382178, 6579041, 6512993, 6448226, 6513250,
+            6579297, 6513506, 6447459, 6513764, 6447458, 6578529, 6382180, 6513762, 6447714,
+            6579299, 6513508, 6382436, 6513763, 6578532, 6381924, 6448228, 6579300, 6381921,
+            6382690, 6382179, 6447713, 6447972, 6513505, 6447457, 6382692, 6513252, 6578785,
+            6578787, 6578531, 6448225, 6382177, 6382433, 6578530, 6448227, 6381922, 6578788,
+            6579044, 6382691, 6512996, 6579043, 6579298, 6447970, 6447716, 6447971, 6381923,
+            6447715, 97, 98, 100, 99, 97, 98, 99, 100,
+        ];
+        let lens: Vec<u8> = iter::repeat_n(2u8, 16)
+            .chain(iter::repeat_n(3u8, 61))
+            .chain(iter::repeat_n(1u8, 8))
+            .collect();
+
+        let mut builder = CompressorBuilder::new();
+        for (symbol, len) in symbols.iter().zip(lens.iter()) {
+            let symbol = Symbol::from_slice(&symbol.to_le_bytes());
+            builder.insert(symbol, *len as usize);
+        }
+        let compressor = builder.build();
+        let built_symbols: &[u64] = unsafe { mem::transmute(compressor.symbol_table()) };
+        assert_eq!(built_symbols, symbols);
     }
 }

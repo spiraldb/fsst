@@ -4,13 +4,12 @@
 //!
 //! [FSST Paper]: https://www.vldb.org/pvldb/vol13/p2649-boncz.pdf
 
+use crate::{
+    Code, Compressor, FSST_CODE_BASE, FSST_CODE_MASK, Symbol, advance_8byte_word, compare_masked,
+    lossy_pht::LossyPHT,
+};
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
-
-use crate::{
-    advance_8byte_word, compare_masked, lossy_pht::LossyPHT, Code, Compressor, Symbol,
-    FSST_CODE_BASE, FSST_CODE_MASK,
-};
 
 /// Bitmap that only works for values up to 512
 #[derive(Clone, Copy, Debug, Default)]
@@ -73,7 +72,7 @@ struct CodesIterator<'a> {
     reference: usize,
 }
 
-impl<'a> Iterator for CodesIterator<'a> {
+impl Iterator for CodesIterator<'_> {
     type Item = u16;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -283,10 +282,8 @@ impl CompressorBuilder {
         }
 
         // Fill codes_two_byte with pseudocode of first byte
-        for byte1 in 0..=255 {
-            for _byte2 in 0..=255 {
-                table.codes_two_byte.push(Code::new_escape(byte1));
-            }
+        for idx in 0..=65_535 {
+            table.codes_two_byte.push(Code::new_escape(idx as u8));
         }
 
         table
@@ -478,8 +475,7 @@ impl CompressorBuilder {
                 self.codes_two_byte[two_bytes] = Code::new_symbol(new_code, 2);
             } else {
                 // The one-byte code for the given code number here...
-                let new_code = self.codes_one_byte[two_bytes as u8 as usize];
-                self.codes_two_byte[two_bytes] = new_code;
+                self.codes_two_byte[two_bytes] = self.codes_one_byte[two_bytes & 0xFF];
             }
         }
 
@@ -853,7 +849,7 @@ impl Ord for Candidate {
 
 #[cfg(test)]
 mod test {
-    use crate::{builder::CodesBitmap, Compressor, ESCAPE_CODE};
+    use crate::{Compressor, ESCAPE_CODE, builder::CodesBitmap};
 
     #[test]
     fn test_builder() {

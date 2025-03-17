@@ -27,7 +27,7 @@ fn main() {
         let mut f = File::open(input_path).unwrap();
         f.read_to_string(&mut string).unwrap();
     }
-    let uncompressed_size = string.as_bytes().len();
+    let uncompressed_size = string.len();
     let lines: Vec<&[u8]> = string.lines().map(|line| line.as_bytes()).collect();
 
     // let mut output = File::create(output_path).unwrap();

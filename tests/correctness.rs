@@ -1,3 +1,5 @@
+//! Correctness tests for FSST.
+
 #![cfg(test)]
 
 use fsst::{Compressor, CompressorBuilder, Symbol};
@@ -78,5 +80,26 @@ fn test_chinese() {
         trained
             .decompressor()
             .decompress(&trained.compress(ART_OF_WAR.as_bytes()))
+    );
+}
+
+#[test]
+fn test_large_with_rebuild() {
+    let corpus: Vec<u8> = DECLARATION.bytes().cycle().take(10_240).collect();
+
+    let trained = Compressor::train(&vec![&corpus]);
+    let compressed = trained.compress(DECLARATION.as_bytes());
+
+    // let compressed = trained.compress(&massive);
+    let rebuilt = Compressor::rebuild_from(trained.symbol_table(), trained.symbol_lengths());
+    let recompressed = rebuilt.compress(DECLARATION.as_bytes());
+
+    assert_eq!(compressed, recompressed);
+
+    // Ensure round-trip after rebuilding the compressor
+    let decompressed = rebuilt.decompressor().decompress(&recompressed);
+    assert_eq!(
+        unsafe { std::str::from_utf8_unchecked(&decompressed) },
+        DECLARATION,
     );
 }
