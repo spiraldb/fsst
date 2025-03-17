@@ -792,8 +792,7 @@ impl Compressor {
         for (code, (&symbol, &len)) in symbols.iter().zip(lengths.iter()).enumerate() {
             match len {
                 2 => {
-                    codes_two_byte[symbol.first2() as usize] =
-                        Code::new_symbol_building(code as u8, 2);
+                    codes_two_byte[symbol.first2() as usize] = Code::new_symbol(code as u8, 2);
                 }
                 3.. => {
                     assert!(
@@ -810,13 +809,11 @@ impl Compressor {
         for (symbol, code) in codes_two_byte.iter_mut().enumerate() {
             if *code == Code::UNUSED {
                 *code = codes_one_byte[symbol & 0xFF];
-            } else {
-                *code = Code::new_symbol(code.code(), 2);
             }
         }
 
         // Find the position of the first 2-byte code that has a suffix later in the table
-        let mut has_suffix_code = symbols.len() as u8;
+        let mut has_suffix_code = 0u8;
         for (code, (&symbol, &len)) in symbols.iter().zip(lengths.iter()).enumerate() {
             if len != 2 {
                 break;
