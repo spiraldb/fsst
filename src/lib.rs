@@ -283,7 +283,7 @@ impl<'a> Decompressor<'a> {
     /// ```
     pub fn decompress_into(&self, compressed: &[u8], decoded: &mut [MaybeUninit<u8>]) -> usize {
         // Ensure the target buffer is at least half the size of the input buffer.
-        // This is the theortical smallest a valid target can be, and occurs when
+        // This is the theoretical smallest a valid target can be, and occurs when
         // every input code is an escape.
         assert!(
             decoded.len() >= compressed.len() / 2,
@@ -292,19 +292,22 @@ impl<'a> Decompressor<'a> {
 
         unsafe {
             let mut in_ptr = compressed.as_ptr();
-            let _in_begin = in_ptr;
             let in_end = in_ptr.add(compressed.len());
 
             let mut out_ptr: *mut u8 = decoded.as_mut_ptr().cast();
             let out_begin = out_ptr.cast_const();
             let out_end = decoded.as_ptr().add(decoded.len()).cast::<u8>();
 
+            // Pre-fetch symbol table references.
+            let symbols = self.symbols;
+            let lengths = self.lengths;
+
             macro_rules! store_next_symbol {
                 ($code:expr) => {{
                     out_ptr
                         .cast::<u64>()
-                        .write_unaligned(self.symbols.get_unchecked($code as usize).as_u64());
-                    out_ptr = out_ptr.add(*self.lengths.get_unchecked($code as usize) as usize);
+                        .write_unaligned(symbols.get_unchecked($code as usize).as_u64());
+                    out_ptr = out_ptr.add(*lengths.get_unchecked($code as usize) as usize);
                 }};
             }
 
