@@ -742,7 +742,7 @@ impl Compressor {
 
     /// Access the decompressor that can be used to decompress strings emitted from this
     /// `Compressor` instance.
-    pub fn decompressor(&self) -> Decompressor {
+    pub fn decompressor(&self) -> Decompressor<'_> {
         Decompressor::new(self.symbol_table(), self.symbol_lengths())
     }
 
