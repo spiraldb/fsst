@@ -6,6 +6,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.3](https://github.com/spiraldb/fsst/compare/v0.5.2...v0.5.3) - 2025-06-17
+
+### Other
+
+- move to Rust 1.85.0 stable toolchain ([#101](https://github.com/spiraldb/fsst/pull/101))
+- *(deps)* lock file maintenance ([#100](https://github.com/spiraldb/fsst/pull/100))
+- *(deps)* lock file maintenance ([#99](https://github.com/spiraldb/fsst/pull/99))
+- *(deps)* update rust crate curl to v0.4.48 ([#98](https://github.com/spiraldb/fsst/pull/98))
+- *(deps)* lock file maintenance ([#97](https://github.com/spiraldb/fsst/pull/97))
+- *(deps)* lock file maintenance ([#96](https://github.com/spiraldb/fsst/pull/96))
+- *(deps)* lock file maintenance ([#93](https://github.com/spiraldb/fsst/pull/93))
+- *(deps)* update rust crate criterion to v2.10.1 ([#94](https://github.com/spiraldb/fsst/pull/94))
+- *(deps)* update rust crate criterion to v2.10.0 ([#92](https://github.com/spiraldb/fsst/pull/92))
+- *(deps)* lock file maintenance ([#91](https://github.com/spiraldb/fsst/pull/91))
+- *(deps)* update mozilla-actions/sccache-action action to v0.0.9 ([#89](https://github.com/spiraldb/fsst/pull/89))
+
 ## [0.5.2](https://github.com/spiraldb/fsst/compare/v0.5.1...v0.5.2) - 2025-03-17
 
 ### Added
