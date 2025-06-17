@@ -39,11 +39,11 @@ impl CodesBitmap {
         );
 
         let map = index >> 6;
-        self.codes[map] & 1 << (index % 64) != 0
+        self.codes[map] & (1 << (index % 64)) != 0
     }
 
     /// Get all codes set in this bitmap
-    pub(crate) fn codes(&self) -> CodesIterator {
+    pub(crate) fn codes(&self) -> CodesIterator<'_> {
         CodesIterator {
             inner: self,
             index: 0,
@@ -198,7 +198,7 @@ impl Counter {
 
     /// Returns an ordered iterator over the codes that were observed
     /// in a call to [`Self::count1`].
-    fn first_codes(&self) -> CodesIterator {
+    fn first_codes(&self) -> CodesIterator<'_> {
         self.code1_index.codes()
     }
 
@@ -207,7 +207,7 @@ impl Counter {
     ///
     /// This is the set of all values `code2` where there was
     /// previously a call to `self.record_count2(code1, code2)`.
-    fn second_codes(&self, code1: u16) -> CodesIterator {
+    fn second_codes(&self, code1: u16) -> CodesIterator<'_> {
         self.pair_index[code1 as usize].codes()
     }
 
