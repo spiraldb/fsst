@@ -675,7 +675,7 @@ impl Compressor {
             // Now, downshift the `word` and the `entry` to see if they align.
             let ignored_bits = entry.ignored_bits;
             if entry.code != Code::UNUSED
-                && compare_masked(word, entry.symbol.as_u64(), ignored_bits)
+                && compare_masked(word, entry.symbol.to_u64(), ignored_bits)
             {
                 // Advance the input by the symbol length (variable) and the output by one code byte
                 // SAFETY: out_ptr is not null.
@@ -773,7 +773,7 @@ impl Compressor {
 
         let remaining_bytes = remaining_bytes as usize;
 
-        // Load the last `remaining_byte`s of data into a final world. We then replicate the loop above,
+        // Load the last `remaining_byte`s of data into a final word. We then replicate the loop above,
         // but shift data out of this word rather than advancing an input pointer and potentially reading
         // unowned memory.
         let mut bytes = [0u8; 8];
@@ -840,7 +840,7 @@ impl Compressor {
             "output buffer sized too small"
         );
 
-        // Load the last `remaining_byte`s of data into a final world. We then replicate the loop above,
+        // Load the last `remaining_byte`s of data into a final word. We then replicate the loop above,
         // but shift data out of this word rather than advancing an input pointer and potentially reading
         // unowned memory.
         let mut bytes = [0u8; 8];

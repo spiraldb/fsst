@@ -705,7 +705,7 @@ impl CompressorBuilder {
         );
         let remaining_bytes = remaining_bytes as usize;
 
-        // Load the last `remaining_byte`s of data into a final world. We then replicate the loop above,
+        // Load the last `remaining_byte`s of data into a final word. We then replicate the loop above,
         // but shift data out of this word rather than advancing an input pointer and potentially reading
         // unowned memory
         let mut bytes = [0u8; 8];
