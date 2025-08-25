@@ -650,8 +650,7 @@ impl Compressor {
         }
     }
 
-    #[inline(always)]
-    fn compress_word_safe(&self, word: u64, out_ptr: &mut [MaybeUninit<u8>; 2]) -> (usize, usize) {
+    fn compress_word_safe(&self, word: u64, out_ptr: &mut [MaybeUninit<u8>]) -> (usize, usize) {
         // Speculatively write the first byte of `word` at offset 1. This is necessary if it is an escape, and
         // if it isn't, it will be overwritten anyway.
         let first_byte = word as u8;
@@ -827,8 +826,7 @@ impl Compressor {
             }
 
             let word = u64::from_le_bytes(input[..8].try_into().unwrap());
-            let (advance_in, advance_out) =
-                self.compress_word_safe(word, &mut output[..2].try_into().unwrap());
+            let (advance_in, advance_out) = self.compress_word_safe(word, output);
             in_ptr += advance_in;
             out_ptr += advance_out;
         }
@@ -853,8 +851,7 @@ impl Compressor {
                 break;
             }
 
-            let (advance_in, advance_out) =
-                self.compress_word_safe(last_word, &mut output[..2].try_into().unwrap());
+            let (advance_in, advance_out) = self.compress_word_safe(last_word, output);
 
             in_ptr += advance_in;
             out_ptr += advance_out;
