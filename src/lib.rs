@@ -650,7 +650,10 @@ impl Compressor {
         }
     }
 
+    #[inline(always)]
     fn compress_word_safe(&self, word: u64, out_ptr: &mut [MaybeUninit<u8>]) -> (usize, usize) {
+        assert!(out_ptr.len() >= 2);
+
         // Speculatively write the first byte of `word` at offset 1. This is necessary if it is an escape, and
         // if it isn't, it will be overwritten anyway.
         let first_byte = word as u8;
