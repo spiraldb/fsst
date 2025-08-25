@@ -79,12 +79,12 @@ fn bench_dbtext(c: &mut Criterion) {
         let mut buffer = Vec::with_capacity(200 * 1024 * 1024);
         group.throughput(Throughput::Bytes(buf.len() as u64));
         group.bench_function("compress-only", |b| {
-            b.iter(|| unsafe { compressor.compress_into(&buf, &mut buffer) });
+            b.iter(|| compressor.compress_into_uninit(&buf, buffer.spare_capacity_mut()));
         });
 
-        unsafe {
-            compressor.compress_into(&buf, &mut buffer);
-        };
+        let initialized = compressor.compress_into_uninit(&buf, buffer.spare_capacity_mut());
+        unsafe { buffer.set_len(initialized) };
+
         let decompressor = compressor.decompressor();
         group.bench_function("decompress", |b| {
             b.iter_with_large_drop(|| decompressor.decompress(&buffer));

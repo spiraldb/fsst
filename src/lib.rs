@@ -650,6 +650,55 @@ impl Compressor {
         }
     }
 
+    fn compress_word_safe(&self, word: u64, out_ptr: &mut [MaybeUninit<u8>]) -> (usize, usize) {
+        // Speculatively write the first byte of `word` at offset 1. This is necessary if it is an escape, and
+        // if it isn't, it will be overwritten anyway.
+        let first_byte = word as u8;
+        out_ptr[1].write(first_byte);
+
+        // First, check the two_bytes table
+        let code_twobyte = self.codes_two_byte[word as u16 as usize];
+
+        if code_twobyte.code() < self.has_suffix_code {
+            // 2 byte code without having to worry about longer matches.
+            out_ptr[0].write(code_twobyte.code());
+
+            // Advance input by symbol length (2) and output by a single code byte
+            (2, 1)
+        } else {
+            // Probe the hash table
+            let entry = self.lossy_pht.lookup(word);
+
+            // Now, downshift the `word` and the `entry` to see if they align.
+            let ignored_bits = entry.ignored_bits;
+            if entry.code != Code::UNUSED
+                && compare_masked(word, entry.symbol.as_u64(), ignored_bits)
+            {
+                // Advance the input by the symbol length (variable) and the output by one code byte
+                // SAFETY: out_ptr is not null.
+                out_ptr[0].write(entry.code.code());
+                (entry.code.len() as usize, 1)
+            } else {
+                // SAFETY: out_ptr is not null
+                out_ptr[0].write(code_twobyte.code());
+
+                // Advance the input by the symbol length (variable) and the output by either 1
+                // byte (if was one-byte code) or two bytes (escape).
+                (
+                    code_twobyte.len() as usize,
+                    // Predicated version of:
+                    //
+                    // if entry.code >= 256 {
+                    //      2
+                    // } else {
+                    //      1
+                    // }
+                    1 + (code_twobyte.extended_code() >> 8) as usize,
+                )
+            }
+        }
+    }
+
     /// Compress many lines in bulk.
     pub fn compress_bulk(&self, lines: &Vec<&[u8]>) -> Vec<Vec<u8>> {
         let mut res = Vec::new();
@@ -761,16 +810,77 @@ impl Compressor {
         unsafe { values.set_len(bytes_written as usize) };
     }
 
+    /// Compress a plain value into a block of uninitialized memory.
+    ///
+    /// Returns the number of bytes of memory that were initialized.
+    pub fn compress_into_uninit(&self, plaintext: &[u8], into: &mut [MaybeUninit<u8>]) -> usize {
+        let mut in_ptr = 0;
+        let mut out_ptr = 0;
+
+        loop {
+            let input = &plaintext[in_ptr..];
+            let output = &mut into[out_ptr..];
+
+            if input.len() < 8 || output.len() < 8 {
+                break;
+            }
+
+            let word = u64::from_le_bytes(input[..8].try_into().unwrap());
+            let (advance_in, advance_out) = self.compress_word_safe(word, output);
+            in_ptr += advance_in;
+            out_ptr += advance_out;
+        }
+
+        let remaining_bytes = plaintext.len() - in_ptr;
+        assert!(
+            out_ptr < into.len() || remaining_bytes == 0,
+            "output buffer sized too small"
+        );
+
+        // Load the last `remaining_byte`s of data into a final world. We then replicate the loop above,
+        // but shift data out of this word rather than advancing an input pointer and potentially reading
+        // unowned memory.
+        let mut bytes = [0u8; 8];
+        bytes[0..remaining_bytes].copy_from_slice(&plaintext[in_ptr..]);
+        let mut last_word = u64::from_le_bytes(bytes);
+
+        loop {
+            let output = &mut into[out_ptr..];
+
+            if in_ptr >= plaintext.len() || output.is_empty() {
+                break;
+            }
+
+            let (advance_in, advance_out) = self.compress_word_safe(last_word, output);
+
+            in_ptr += advance_in;
+            out_ptr += advance_out;
+            last_word = advance_8byte_word(last_word, advance_in);
+        }
+
+        assert!(
+            in_ptr >= plaintext.len(),
+            "exhausted output buffer before exhausting input, there is a bug in SymbolTable::compress()"
+        );
+
+        out_ptr
+    }
+
     /// Use the symbol table to compress the plaintext into a sequence of codes and escapes.
     pub fn compress(&self, plaintext: &[u8]) -> Vec<u8> {
         if plaintext.is_empty() {
             return Vec::new();
         }
 
+        // Initialize a buffer sufficiently large to handle all plaintext.
         let mut buffer = Vec::with_capacity(plaintext.len() * 2);
 
         // SAFETY: the largest compressed size would be all escapes == 2*plaintext_len
-        unsafe { self.compress_into(plaintext, &mut buffer) };
+        let initialized = self.compress_into_uninit(plaintext, buffer.spare_capacity_mut());
+
+        // SAFETY: `initialized` elements were initialized in the call above.
+        // TODO(aduffy): shrink_to_fit?
+        unsafe { buffer.set_len(initialized) };
 
         buffer
     }

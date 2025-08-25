@@ -142,9 +142,7 @@ fn bench_compress(c: &mut Criterion) {
         assert!(compressor.insert(Symbol::from_u8(b'a'), 1));
         let compressor = compressor.build();
 
-        b.iter(|| unsafe {
-            compressor.compress_into(&test_string, &mut output_buf);
-        })
+        b.iter(|| compressor.compress_into_uninit(&test_string, output_buf.spare_capacity_mut()))
     });
     group.finish();
 
@@ -159,9 +157,7 @@ fn bench_compress(c: &mut Criterion) {
         assert!(compressor.insert(Symbol::from_slice(&[b'b', b'a', b'b', 0, 0, 0, 0, 0]), 3));
         let compressor = compressor.build();
 
-        b.iter(|| unsafe {
-            compressor.compress_into(&test_string, &mut output_buf);
-        })
+        b.iter(|| compressor.compress_into_uninit(&test_string, output_buf.spare_capacity_mut()))
     });
     group.finish();
 
@@ -173,9 +169,7 @@ fn bench_compress(c: &mut Criterion) {
         assert!(compressor.insert(Symbol::from_slice(&[b'a', b'b', b'c', b'd', 0, 0, 0, 0]), 4));
         let compressor = compressor.build();
 
-        b.iter(|| unsafe {
-            compressor.compress_into(&test_string, &mut output_buf);
-        })
+        b.iter(|| compressor.compress_into_uninit(&test_string, output_buf.spare_capacity_mut()))
     });
     group.finish();
 
@@ -187,9 +181,7 @@ fn bench_compress(c: &mut Criterion) {
         assert!(compressor.insert(Symbol::from_slice(b"abcdefgh"), 8));
         let compressor = compressor.build();
 
-        b.iter(|| unsafe {
-            compressor.compress_into(&test_string, &mut output_buf);
-        })
+        b.iter(|| compressor.compress_into_uninit(&test_string, output_buf.spare_capacity_mut()))
     });
 
     group.bench_function("decompress", |b| {
