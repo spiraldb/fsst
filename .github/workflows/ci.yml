@@ -17,8 +17,6 @@ jobs:
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
       - uses: ./.github/actions/setup-rust
-
-
       - name: Rust Build
         run: cargo build --all-features --all-targets
       - name: Rust Lint - Format
@@ -41,12 +39,37 @@ jobs:
 
       - name: Build benchmarks
         env:
-          RUSTFLAGS: "-C target-cpu=native"
+          RUSTFLAGS: "-C target-feature=+avx2"
         run: |
-          cargo codspeed build --profile bench
+          cargo codspeed build --profile bench -m instrumentation
 
-      - name: Run benchmarks
-        uses: CodSpeedHQ/action@v3
+      - name: Run benchmarks - Instrumentation
+        uses: CodSpeedHQ/action@653fdc30e6c40ffd9739e40c8a0576f4f4523ca1 # v4
         with:
           run: cargo codspeed run
           token: ${{ secrets.CODSPEED_TOKEN }}
+          mode: instrumentation
+
+  bench-codspeed-walltime:
+    name: Benchmark with Codspeed
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
+      - uses: ./.github/actions/setup-rust
+
+      - name: Install Codspeed
+        shell: bash
+        run: cargo install --force cargo-codspeed --locked
+
+      - name: Build benchmarks
+        env:
+          RUSTFLAGS: "-C target-feature=+avx2"
+        run: |
+          cargo codspeed build --profile bench -m walltime
+
+      - name: Run benchmarks - Wall time
+        uses: CodSpeedHQ/action@653fdc30e6c40ffd9739e40c8a0576f4f4523ca1 # v4
+        with:
+          run: cargo codspeed run
+          token: ${{ secrets.CODSPEED_TOKEN }}
+          mode: walltime
