@@ -308,6 +308,20 @@ impl<'a> Decompressor<'a> {
                 }};
             }
 
+            // Prefetch helper for symbol table entries
+            #[cfg(target_arch = "x86_64")]
+            #[inline(always)]
+            unsafe fn prefetch_symbol(ptr: *const Symbol) {
+                use std::arch::x86_64::{_MM_HINT_T0, _mm_prefetch};
+                unsafe { _mm_prefetch(ptr as *const i8, _MM_HINT_T0) };
+            }
+
+            #[cfg(not(target_arch = "x86_64"))]
+            #[inline(always)]
+            unsafe fn prefetch_symbol(_ptr: *const Symbol) {
+                // No-op on non-x86_64 platforms
+            }
+
             // First we try loading 8 bytes at a time.
             if decoded.len() >= 8 * size_of::<Symbol>() && compressed.len() >= 8 {
                 // Extract the loop condition since the compiler fails to do so
@@ -321,8 +335,26 @@ impl<'a> Decompressor<'a> {
                         & ((((!next_block) & 0x7F7F7F7F7F7F7F7F) + 0x7F7F7F7F7F7F7F7F)
                             ^ 0x8080808080808080);
 
+                    // Prefetch symbols from the next block while processing current
+                    if in_ptr.add(8) < block_in_end {
+                        let future_block = in_ptr.add(8).cast::<u64>().read_unaligned();
+                        // Prefetch up to 4 symbols from the future block
+                        let symbol_base = self.symbols.as_ptr();
+                        prefetch_symbol(symbol_base.add((future_block & 0xFF) as usize));
+                        prefetch_symbol(symbol_base.add(((future_block >> 8) & 0xFF) as usize));
+                        prefetch_symbol(symbol_base.add(((future_block >> 16) & 0xFF) as usize));
+                        prefetch_symbol(symbol_base.add(((future_block >> 24) & 0xFF) as usize));
+                    }
+
                     // If there are no escape codes, we write each symbol one by one.
                     if escape_mask == 0 {
+                        // Prefetch all 8 symbols from current block for better cache locality
+                        let symbol_base = self.symbols.as_ptr();
+                        prefetch_symbol(symbol_base.add(((next_block >> 32) & 0xFF) as usize));
+                        prefetch_symbol(symbol_base.add(((next_block >> 40) & 0xFF) as usize));
+                        prefetch_symbol(symbol_base.add(((next_block >> 48) & 0xFF) as usize));
+                        prefetch_symbol(symbol_base.add(((next_block >> 56) & 0xFF) as usize));
+
                         let code = (next_block & 0xFF) as u8;
                         store_next_symbol!(code);
                         let code = ((next_block >> 8) & 0xFF) as u8;
