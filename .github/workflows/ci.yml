@@ -39,7 +39,7 @@ jobs:
 
       - name: Build benchmarks
         env:
-          RUSTFLAGS: "-C target-cpu=native"
+          RUSTFLAGS: "-C target-feature=+avx2"
         run: |
           cargo codspeed build --profile bench -m instrumentation
 
@@ -63,7 +63,7 @@ jobs:
 
       - name: Build benchmarks
         env:
-          RUSTFLAGS: "-C target-cpu=native"
+          RUSTFLAGS: "-C target-feature=+avx2"
         run: |
           cargo codspeed build --profile bench -m walltime
 
