@@ -65,8 +65,9 @@ impl Symbol {
         if len == 0 { 1 } else { len }
     }
 
+    /// Returns the Symbol's inner representation.
     #[inline]
-    fn as_u64(self) -> u64 {
+    pub fn to_u64(self) -> u64 {
         self.0
     }
 
@@ -303,7 +304,7 @@ impl<'a> Decompressor<'a> {
                 ($code:expr) => {{
                     out_ptr
                         .cast::<u64>()
-                        .write_unaligned(self.symbols.get_unchecked($code as usize).as_u64());
+                        .write_unaligned(self.symbols.get_unchecked($code as usize).to_u64());
                     out_ptr = out_ptr.add(*self.lengths.get_unchecked($code as usize) as usize);
                 }};
             }
@@ -588,7 +589,7 @@ impl Compressor {
             // Now, downshift the `word` and the `entry` to see if they align.
             let ignored_bits = entry.ignored_bits;
             if entry.code != Code::UNUSED
-                && compare_masked(word, entry.symbol.as_u64(), ignored_bits)
+                && compare_masked(word, entry.symbol.to_u64(), ignored_bits)
             {
                 // Advance the input by the symbol length (variable) and the output by one code byte
                 // SAFETY: out_ptr is not null.

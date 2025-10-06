@@ -79,7 +79,7 @@ impl LossyPHT {
     ///
     /// True if the symbol was inserted into the table, false if it was rejected due to collision.
     pub(crate) fn insert(&mut self, symbol: Symbol, len: usize, code: u8) -> bool {
-        let prefix_3bytes = symbol.as_u64() & 0xFF_FF_FF;
+        let prefix_3bytes = symbol.to_u64() & 0xFF_FF_FF;
         let slot = fsst_hash(prefix_3bytes) as usize & (HASH_TABLE_SIZE - 1);
         let entry = &mut self.slots[slot];
         if !entry.is_unused() {
@@ -106,7 +106,7 @@ impl LossyPHT {
 
     /// Remove the symbol from the hashtable, if it exists.
     pub(crate) fn remove(&mut self, symbol: Symbol) {
-        let prefix_3bytes = symbol.as_u64() & 0xFF_FF_FF;
+        let prefix_3bytes = symbol.to_u64() & 0xFF_FF_FF;
         let slot = fsst_hash(prefix_3bytes) as usize & (HASH_TABLE_SIZE - 1);
         self.slots[slot].code = Code::UNUSED;
     }

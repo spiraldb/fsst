@@ -632,7 +632,7 @@ impl CompressorBuilder {
         let ignored_bits = entry.ignored_bits;
 
         // If the entry is valid, return the code
-        if !entry.is_unused() && compare_masked(word, entry.symbol.as_u64(), ignored_bits) {
+        if !entry.is_unused() && compare_masked(word, entry.symbol.to_u64(), ignored_bits) {
             return entry.code;
         }
 
