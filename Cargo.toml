@@ -27,7 +27,7 @@ unwrap_in_result = { level = "deny" }
 use_debug = { level = "deny" }
 
 [dev-dependencies]
-criterion = { package = "codspeed-criterion-compat", version = "3.0" }
+criterion = { package = "codspeed-criterion-compat", version = "4.0" }
 curl = "0.4"
 
 [[example]]
