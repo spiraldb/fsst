@@ -44,7 +44,7 @@ jobs:
           cargo codspeed build --profile bench -m instrumentation
 
       - name: Run benchmarks - Instrumentation
-        uses: CodSpeedHQ/action@653fdc30e6c40ffd9739e40c8a0576f4f4523ca1 # v4
+        uses: CodSpeedHQ/action@3959e9e296ef25296e93e32afcc97196f966e57f # v4
         with:
           run: cargo codspeed run
           token: ${{ secrets.CODSPEED_TOKEN }}
@@ -68,7 +68,7 @@ jobs:
           cargo codspeed build --profile bench -m walltime
 
       - name: Run benchmarks - Wall time
-        uses: CodSpeedHQ/action@653fdc30e6c40ffd9739e40c8a0576f4f4523ca1 # v4
+        uses: CodSpeedHQ/action@3959e9e296ef25296e93e32afcc97196f966e57f # v4
         with:
           run: cargo codspeed run
           token: ${{ secrets.CODSPEED_TOKEN }}
