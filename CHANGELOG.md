@@ -6,6 +6,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.4](https://github.com/spiraldb/fsst/compare/v0.5.3...v0.5.4) - 2025-10-06
+
+### Other
+
+- Expose internal bytes of Symbol ([#131](https://github.com/spiraldb/fsst/pull/131))
+- *(deps)* update rust crate criterion to v4 ([#129](https://github.com/spiraldb/fsst/pull/129))
+- *(deps)* update codspeedhq/action digest to 3959e9e ([#130](https://github.com/spiraldb/fsst/pull/130))
+- *(deps)* pin dependencies ([#116](https://github.com/spiraldb/fsst/pull/116))
+- *(deps)* update codspeedhq/action action to v4 ([#124](https://github.com/spiraldb/fsst/pull/124))
+- *(deps)* lock file maintenance ([#127](https://github.com/spiraldb/fsst/pull/127))
+- *(deps)* lock file maintenance ([#126](https://github.com/spiraldb/fsst/pull/126))
+- *(deps)* lock file maintenance ([#125](https://github.com/spiraldb/fsst/pull/125))
+- *(deps)* lock file maintenance ([#122](https://github.com/spiraldb/fsst/pull/122))
+- *(deps)* lock file maintenance ([#121](https://github.com/spiraldb/fsst/pull/121))
+- *(deps)* update actions/checkout action to v5 ([#119](https://github.com/spiraldb/fsst/pull/119))
+- *(deps)* lock file maintenance ([#118](https://github.com/spiraldb/fsst/pull/118))
+- *(deps)* lock file maintenance ([#117](https://github.com/spiraldb/fsst/pull/117))
+- *(deps)* update rust crate criterion to v3.0.5 ([#115](https://github.com/spiraldb/fsst/pull/115))
+- *(deps)* lock file maintenance ([#114](https://github.com/spiraldb/fsst/pull/114))
+- *(deps)* update rust crate criterion to v3.0.4 ([#113](https://github.com/spiraldb/fsst/pull/113))
+- *(deps)* lock file maintenance ([#112](https://github.com/spiraldb/fsst/pull/112))
+- *(deps)* lock file maintenance ([#111](https://github.com/spiraldb/fsst/pull/111))
+- *(deps)* update rust crate criterion to v3.0.3 ([#110](https://github.com/spiraldb/fsst/pull/110))
+- *(deps)* lock file maintenance ([#109](https://github.com/spiraldb/fsst/pull/109))
+- *(deps)* update rust crate criterion to v3.0.2 ([#108](https://github.com/spiraldb/fsst/pull/108))
+- *(deps)* update rust crate criterion to v3 ([#105](https://github.com/spiraldb/fsst/pull/105))
+
 ## [0.5.3](https://github.com/spiraldb/fsst/compare/v0.5.2...v0.5.3) - 2025-06-17
 
 ### Other
