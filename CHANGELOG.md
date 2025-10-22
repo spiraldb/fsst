@@ -6,6 +6,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.5](https://github.com/spiraldb/fsst/compare/v0.5.4...v0.5.5) - 2025-10-22
+
+### Other
+
+- Add Hash/Eq to FSST symbol ([#137](https://github.com/spiraldb/fsst/pull/137))
+- *(deps)* update codspeedhq/action digest to c6574d0 ([#135](https://github.com/spiraldb/fsst/pull/135))
+- *(deps)* update codspeedhq/action digest to 7a5b8b0 ([#132](https://github.com/spiraldb/fsst/pull/132))
+- *(deps)* update marcoieni/release-plz-action digest to d529f73 ([#133](https://github.com/spiraldb/fsst/pull/133))
+
 ## [0.5.4](https://github.com/spiraldb/fsst/compare/v0.5.3...v0.5.4) - 2025-10-06
 
 ### Other
