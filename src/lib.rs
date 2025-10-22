@@ -19,7 +19,7 @@ pub use builder::*;
 
 /// `Symbol`s are small (up to 8-byte) segments of strings, stored in a [`Compressor`][`crate::Compressor`] and
 /// identified by an 8-bit code.
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash)]
 pub struct Symbol(u64);
 
 assert_sizeof!(Symbol => 8);
@@ -145,7 +145,7 @@ impl Debug for Symbol {
 /// a placeholder for the invalid code here.
 ///
 /// Bits 12-15 store the length of the symbol (values ranging from 0-8).
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 struct Code(u16);
 
 /// Code used to indicate bytes that are not in the symbol table.
