@@ -606,6 +606,8 @@ impl Compressor {
 
         let mut counters = Counter::new();
         let mut sample_memory = Vec::with_capacity(FSST_SAMPLEMAX);
+        let mut pqueue = BinaryHeap::with_capacity(65_536);
+
         let sample = make_sample(&mut sample_memory, values);
         for sample_frac in GENERATIONS {
             for (i, line) in sample.iter().enumerate() {
@@ -616,7 +618,9 @@ impl Compressor {
                 builder.compress_count(line, &mut counters);
             }
 
-            builder.optimize(&counters, sample_frac);
+            // Clear the heap before we use it again
+            pqueue.clear();
+            builder.optimize(&counters, sample_frac, &mut pqueue);
             counters.clear();
         }
 
@@ -747,9 +751,12 @@ impl CompressorBuilder {
 
     /// Using a set of counters and the existing set of symbols, build a new
     /// set of symbols/codes that optimizes the gain over the distribution in `counter`.
-    fn optimize(&mut self, counters: &Counter, sample_frac: usize) {
-        let mut pqueue = BinaryHeap::with_capacity(65_536);
-
+    fn optimize(
+        &mut self,
+        counters: &Counter,
+        sample_frac: usize,
+        pqueue: &mut BinaryHeap<Candidate>,
+    ) {
         for code1 in counters.first_codes() {
             let symbol1 = self.symbols[code1 as usize];
             let symbol1_len = symbol1.len();
