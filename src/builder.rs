@@ -9,7 +9,6 @@ use crate::{
     lossy_pht::LossyPHT,
 };
 use std::cmp::Ordering;
-use std::collections::BinaryHeap;
 
 /// Bitmap that only works for values up to 512
 #[derive(Clone, Copy, Debug, Default)]
@@ -606,7 +605,7 @@ impl Compressor {
 
         let mut counters = Counter::new();
         let mut sample_memory = Vec::with_capacity(FSST_SAMPLEMAX);
-        let mut pqueue = BinaryHeap::with_capacity(65_536);
+        let mut pqueue = Vec::with_capacity(65_536);
 
         let sample = make_sample(&mut sample_memory, values);
         for sample_frac in GENERATIONS {
@@ -751,12 +750,7 @@ impl CompressorBuilder {
 
     /// Using a set of counters and the existing set of symbols, build a new
     /// set of symbols/codes that optimizes the gain over the distribution in `counter`.
-    fn optimize(
-        &mut self,
-        counters: &Counter,
-        sample_frac: usize,
-        pqueue: &mut BinaryHeap<Candidate>,
-    ) {
+    fn optimize(&mut self, counters: &Counter, sample_frac: usize, pqueue: &mut Vec<Candidate>) {
         for code1 in counters.first_codes() {
             let symbol1 = self.symbols[code1 as usize];
             let symbol1_len = symbol1.len();
@@ -805,13 +799,12 @@ impl CompressorBuilder {
         // clear self in advance of inserting the symbols.
         self.clear();
 
-        // Pop the 255 best symbols.
-        let mut n_symbols = 0;
-        while !pqueue.is_empty() && n_symbols < 255 {
+        pqueue.sort_unstable();
+
+        // Pop the 255 best symbols.c
+        while self.n_symbols < 255 && !pqueue.is_empty() {
             let candidate = pqueue.pop().unwrap();
-            if self.insert(candidate.symbol, candidate.symbol.len()) {
-                n_symbols += 1;
-            }
+            self.insert(candidate.symbol, candidate.symbol.len());
         }
     }
 }
