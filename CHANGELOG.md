@@ -6,6 +6,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.6](https://github.com/spiraldb/fsst/compare/v0.5.5...v0.5.6) - 2025-11-11
+
+### Other
+
+- *(deps)* update codspeedhq/action digest to 6a8e2b8 ([#147](https://github.com/spiraldb/fsst/pull/147))
+- Bump MSRV to 1.86 (and codspeed) ([#149](https://github.com/spiraldb/fsst/pull/149))
+- *(deps)* lock file maintenance ([#146](https://github.com/spiraldb/fsst/pull/146))
+- Reuse binary heap during training ([#144](https://github.com/spiraldb/fsst/pull/144))
+- *(deps)* lock file maintenance ([#141](https://github.com/spiraldb/fsst/pull/141))
+- *(deps)* update actions/upload-artifact action to v5 ([#139](https://github.com/spiraldb/fsst/pull/139))
+- *(deps)* update codspeedhq/action digest to 4348f63 ([#138](https://github.com/spiraldb/fsst/pull/138))
+
 ## [0.5.5](https://github.com/spiraldb/fsst/compare/v0.5.4...v0.5.5) - 2025-10-22
 
 ### Other
