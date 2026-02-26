@@ -1,5 +1,7 @@
 //! Test to demonstrate successful decompression on exact capacity bounds without panicking
 
+#![cfg(test)]
+
 use fsst::{CompressorBuilder, Symbol};
 
 #[test]
