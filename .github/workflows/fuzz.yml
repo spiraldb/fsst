@@ -17,12 +17,12 @@ jobs:
         run: cargo fuzz run fuzz_compress -- -max_total_time=600
         continue-on-error: true
       - name: Archive crash artifacts
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
         with:
           name: fuzzing-crash-artifacts
           path: fuzz/artifacts
       - name: Archive fuzzing corpus
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
         with:
           name: fuzzing-corpus
           path: fuzz/corpus
