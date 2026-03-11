@@ -315,9 +315,17 @@ impl<'a> Decompressor<'a> {
                 let block_out_end = out_end.sub(8 * size_of::<Symbol>());
                 let block_in_end = in_end.sub(8);
 
-                while out_ptr.cast_const() <= block_out_end && in_ptr < block_in_end {
+                while out_ptr.cast_const() <= block_out_end && in_ptr <= block_in_end {
                     // Note that we load a little-endian u64 here.
                     let next_block = in_ptr.cast::<u64>().read_unaligned();
+                    // Escape-heavy inputs often start with ESCAPE; skip mask/match overhead in that case.
+                    if (next_block as u8) == ESCAPE_CODE {
+                        out_ptr.write(((next_block >> 8) & 0xFF) as u8);
+                        in_ptr = in_ptr.add(2);
+                        out_ptr = out_ptr.add(1);
+                        continue;
+                    }
+
                     let escape_mask = (next_block & 0x8080808080808080)
                         & ((((!next_block) & 0x7F7F7F7F7F7F7F7F) + 0x7F7F7F7F7F7F7F7F)
                             ^ 0x8080808080808080);
