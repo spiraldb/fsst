@@ -8,6 +8,105 @@ fn one_megabyte(seed: &[u8]) -> Vec<u8> {
     seed.iter().copied().cycle().take(1024 * 1024).collect()
 }
 
+fn bench_decompress_short(c: &mut Criterion) {
+    let mut compressor = CompressorBuilder::new();
+    assert!(compressor.insert(Symbol::from_slice(b"abcdefgh"), 8));
+    let compressor = compressor.build();
+    let decompressor = compressor.decompressor();
+
+    let short_64 = b"abcdefgh"
+        .iter()
+        .copied()
+        .cycle()
+        .take(64)
+        .collect::<Vec<_>>();
+    let compressed_64 = compressor.compress(&short_64);
+    assert_eq!(compressed_64.len(), 8);
+    let mut decoded_64 =
+        Vec::with_capacity(decompressor.max_decompression_capacity(&compressed_64) + 7);
+
+    let mut group = c.benchmark_group("decompress-short/8b-64b");
+    group.throughput(Throughput::Bytes(short_64.len() as u64));
+    group.bench_function("decompress-into-reuse", |b| {
+        b.iter(|| {
+            let len = decompressor.decompress_into(&compressed_64, decoded_64.spare_capacity_mut());
+            // SAFETY: decompress_into initializes exactly len bytes.
+            unsafe { decoded_64.set_len(len) };
+            let _ = std::hint::black_box(&decoded_64);
+            decoded_64.clear();
+        })
+    });
+    group.finish();
+
+    let short_128 = b"abcdefgh"
+        .iter()
+        .copied()
+        .cycle()
+        .take(128)
+        .collect::<Vec<_>>();
+    let compressed_128 = compressor.compress(&short_128);
+    assert_eq!(compressed_128.len(), 16);
+    let mut decoded_128 =
+        Vec::with_capacity(decompressor.max_decompression_capacity(&compressed_128) + 7);
+
+    let mut group = c.benchmark_group("decompress-short/16b-128b");
+    group.throughput(Throughput::Bytes(short_128.len() as u64));
+    group.bench_function("decompress-into-reuse", |b| {
+        b.iter(|| {
+            let len =
+                decompressor.decompress_into(&compressed_128, decoded_128.spare_capacity_mut());
+            // SAFETY: decompress_into initializes exactly len bytes.
+            unsafe { decoded_128.set_len(len) };
+            let _ = std::hint::black_box(&decoded_128);
+            decoded_128.clear();
+        })
+    });
+    group.finish();
+}
+
+fn bench_decompress_escape_heavy(c: &mut Criterion) {
+    let test_string = one_megabyte(b"abcdefgh");
+
+    let mut compressor = CompressorBuilder::new();
+    assert!(compressor.insert(Symbol::from_slice(b"abcdefgh"), 8));
+    let compressor = compressor.build();
+    let compressed_cf8 = compressor.compress(&test_string);
+    let decompressor_cf8 = compressor.decompressor();
+    let mut decoded_cf8 =
+        Vec::with_capacity(decompressor_cf8.max_decompression_capacity(&compressed_cf8) + 7);
+
+    // Empty symbol table forces every input byte to be encoded as ESCAPE + raw byte.
+    let escape_compressor = CompressorBuilder::new().build();
+    let compressed_escape = escape_compressor.compress(&test_string);
+    let escape_decompressor = escape_compressor.decompressor();
+    let mut decoded_escape =
+        Vec::with_capacity(escape_decompressor.max_decompression_capacity(&compressed_escape) + 7);
+
+    let mut group = c.benchmark_group("decompress-regimes/1mb");
+    group.throughput(Throughput::Bytes(test_string.len() as u64));
+    group.bench_function("decompress-into-reuse-cf8", |b| {
+        b.iter(|| {
+            let len =
+                decompressor_cf8.decompress_into(&compressed_cf8, decoded_cf8.spare_capacity_mut());
+            // SAFETY: decompress_into initializes exactly len bytes.
+            unsafe { decoded_cf8.set_len(len) };
+            let _ = std::hint::black_box(&decoded_cf8);
+            decoded_cf8.clear();
+        })
+    });
+    group.bench_function("decompress-into-reuse-all-escape", |b| {
+        b.iter(|| {
+            let len = escape_decompressor
+                .decompress_into(&compressed_escape, decoded_escape.spare_capacity_mut());
+            // SAFETY: decompress_into initializes exactly len bytes.
+            unsafe { decoded_escape.set_len(len) };
+            let _ = std::hint::black_box(&decoded_escape);
+            decoded_escape.clear();
+        })
+    });
+    group.finish();
+}
+
 fn bench_compress(c: &mut Criterion) {
     let mut group = c.benchmark_group("compress-overhead");
     // Reusable memory to hold outputs
@@ -108,5 +207,10 @@ fn bench_compress(c: &mut Criterion) {
     let _ = std::hint::black_box(output_buf);
 }
 
-criterion_group!(bench_micro, bench_compress);
+criterion_group!(
+    bench_micro,
+    bench_compress,
+    bench_decompress_short,
+    bench_decompress_escape_heavy
+);
 criterion_main!(bench_micro);
