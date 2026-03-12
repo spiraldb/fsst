@@ -49,27 +49,3 @@ jobs:
           run: cargo codspeed run
           token: ${{ secrets.CODSPEED_TOKEN }}
           mode: instrumentation
-
-  bench-codspeed-walltime:
-    name: Benchmark with Codspeed
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-      - uses: ./.github/actions/setup-rust
-
-      - name: Install Codspeed
-        shell: bash
-        run: cargo install --force cargo-codspeed --locked
-
-      - name: Build benchmarks
-        env:
-          RUSTFLAGS: "-C target-feature=+avx2"
-        run: |
-          cargo codspeed build --profile bench -m walltime
-
-      - name: Run benchmarks - Wall time
-        uses: CodSpeedHQ/action@281164b0f014a4e7badd2c02cecad9b595b70537 # v4
-        with:
-          run: cargo codspeed run
-          token: ${{ secrets.CODSPEED_TOKEN }}
-          mode: walltime
