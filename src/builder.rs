@@ -312,11 +312,17 @@ impl CompressorBuilder {
         assert_eq!(len, symbol.len(), "provided len must equal symbol.len()");
 
         if len == 2 {
-            // shortCodes
+            // Check if this 2-byte symbol is already in the table.
+            if self.codes_two_byte[symbol.first2() as usize].extended_code() >= FSST_CODE_BASE {
+                return false;
+            }
             self.codes_two_byte[symbol.first2() as usize] =
                 Code::new_symbol_building(self.n_symbols, 2);
         } else if len == 1 {
-            // byteCodes
+            // Check if this 1-byte symbol is already in the table.
+            if self.codes_one_byte[symbol.first_byte() as usize].extended_code() >= FSST_CODE_BASE {
+                return false;
+            }
             self.codes_one_byte[symbol.first_byte() as usize] =
                 Code::new_symbol_building(self.n_symbols, 1);
         } else {
@@ -933,5 +939,48 @@ mod test {
     fn test_bitmap_invalid() {
         let mut map = CodesBitmap::default();
         map.set(512);
+    }
+
+    #[test]
+    fn test_no_duplicate_symbols() {
+        // Train on data that is likely to produce duplicate 1-byte and 2-byte candidates.
+        let text = b"aababcabcdabcde";
+        let corpus: Vec<&[u8]> = std::iter::repeat_n(text.as_slice(), 100).collect();
+        let compressor = Compressor::train(&corpus);
+
+        let symbols = compressor.symbol_table();
+        let lengths = compressor.symbol_lengths();
+
+        // Collect all 1-byte symbols and check for duplicates.
+        let one_byte: Vec<u8> = symbols
+            .iter()
+            .zip(lengths.iter())
+            .filter(|&(_, &len)| len == 1)
+            .map(|(sym, _)| sym.first_byte())
+            .collect();
+        let mut one_byte_sorted = one_byte.clone();
+        one_byte_sorted.sort();
+        one_byte_sorted.dedup();
+        assert_eq!(
+            one_byte.len(),
+            one_byte_sorted.len(),
+            "duplicate 1-byte symbols found"
+        );
+
+        // Collect all 2-byte symbols and check for duplicates.
+        let two_byte: Vec<u16> = symbols
+            .iter()
+            .zip(lengths.iter())
+            .filter(|&(_, &len)| len == 2)
+            .map(|(sym, _)| sym.first2())
+            .collect();
+        let mut two_byte_sorted = two_byte.clone();
+        two_byte_sorted.sort();
+        two_byte_sorted.dedup();
+        assert_eq!(
+            two_byte.len(),
+            two_byte_sorted.len(),
+            "duplicate 2-byte symbols found"
+        );
     }
 }
