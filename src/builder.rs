@@ -8,6 +8,7 @@ use crate::{
     Code, Compressor, FSST_CODE_BASE, FSST_CODE_MASK, Symbol, advance_8byte_word, compare_masked,
     lossy_pht::LossyPHT,
 };
+use fxhash::FxHashMap;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
@@ -757,6 +758,12 @@ impl CompressorBuilder {
         sample_frac: usize,
         pqueue: &mut BinaryHeap<Candidate>,
     ) {
+        // Use a HashMap to deduplicate candidates by symbol content, combining gains
+        // when the same symbol is encountered via different codes.
+        // This matches the C++ implementation's use of unordered_set<QSymbol> with addOrInc.
+        // NOTE: we use fxhash since that is the best Rust hasher for 64-bit ints.
+        let mut candidates = FxHashMap::default();
+
         for code1 in counters.first_codes() {
             let symbol1 = self.symbols[code1 as usize];
             let symbol1_len = symbol1.len();
@@ -771,14 +778,12 @@ impl CompressorBuilder {
             let mut gain = count * symbol1_len;
             // NOTE: use heuristic from C++ implementation to boost the gain of single-byte symbols.
             // This helps to reduce exception counts.
-            if code1 < 256 {
+            if symbol1_len == 1 {
                 gain *= 8;
             }
 
-            pqueue.push(Candidate {
-                symbol: symbol1,
-                gain,
-            });
+            // Add or combine gain for this symbol
+            *candidates.entry(symbol1).or_insert(0) += gain;
 
             // Skip merges on last round, or when symbol cannot be extended.
             if sample_frac >= 128 || symbol1_len == 8 {
@@ -795,11 +800,14 @@ impl CompressorBuilder {
                 let new_symbol = symbol1.concat(symbol2);
                 let gain = counters.count2(code1, code2) * new_symbol.len();
 
-                pqueue.push(Candidate {
-                    symbol: new_symbol,
-                    gain,
-                })
+                // Add or combine gain for this merged symbol
+                *candidates.entry(new_symbol).or_insert(0) += gain;
             }
+        }
+
+        // Transfer deduplicated candidates to the priority queue
+        for (symbol, gain) in candidates {
+            pqueue.push(Candidate { symbol, gain });
         }
 
         // clear self in advance of inserting the symbols.
@@ -933,5 +941,48 @@ mod test {
     fn test_bitmap_invalid() {
         let mut map = CodesBitmap::default();
         map.set(512);
+    }
+
+    #[test]
+    fn test_no_duplicate_symbols() {
+        // Train on data that is likely to produce duplicate 1-byte and 2-byte candidates.
+        let text = b"aababcabcdabcde";
+        let corpus: Vec<&[u8]> = std::iter::repeat_n(text.as_slice(), 100).collect();
+        let compressor = Compressor::train(&corpus);
+
+        let symbols = compressor.symbol_table();
+        let lengths = compressor.symbol_lengths();
+
+        // Collect all 1-byte symbols and check for duplicates.
+        let one_byte: Vec<u8> = symbols
+            .iter()
+            .zip(lengths.iter())
+            .filter(|&(_, &len)| len == 1)
+            .map(|(sym, _)| sym.first_byte())
+            .collect();
+        let mut one_byte_sorted = one_byte.clone();
+        one_byte_sorted.sort();
+        one_byte_sorted.dedup();
+        assert_eq!(
+            one_byte.len(),
+            one_byte_sorted.len(),
+            "duplicate 1-byte symbols found"
+        );
+
+        // Collect all 2-byte symbols and check for duplicates.
+        let two_byte: Vec<u16> = symbols
+            .iter()
+            .zip(lengths.iter())
+            .filter(|&(_, &len)| len == 2)
+            .map(|(sym, _)| sym.first2())
+            .collect();
+        let mut two_byte_sorted = two_byte.clone();
+        two_byte_sorted.sort();
+        two_byte_sorted.dedup();
+        assert_eq!(
+            two_byte.len(),
+            two_byte_sorted.len(),
+            "duplicate 2-byte symbols found"
+        );
     }
 }
