@@ -468,17 +468,51 @@ impl<'a> Decompressor<'a> {
                 }
             }
 
-            // Otherwise, fall back to 1-byte reads.
-            while out_end.offset_from(out_ptr) > size_of::<Symbol>() as isize && in_ptr < in_end {
+            // Otherwise, fall back to 1-byte reads using 8-byte writes where safe.
+            while out_end.offset_from(out_ptr) >= size_of::<Symbol>() as isize && in_ptr < in_end {
                 let code = in_ptr.read();
                 in_ptr = in_ptr.add(1);
 
                 if code == ESCAPE_CODE {
+                    assert!(
+                        in_ptr < in_end,
+                        "truncated compressed string: escape code at end of input"
+                    );
                     out_ptr.write(in_ptr.read());
                     in_ptr = in_ptr.add(1);
                     out_ptr = out_ptr.add(1);
                 } else {
                     store_next_symbol!(code);
+                }
+            }
+
+            // For the last few bytes (if any) where we can't do an 8-byte unaligned write.
+            while in_ptr < in_end {
+                let code = in_ptr.read();
+                in_ptr = in_ptr.add(1);
+
+                if code == ESCAPE_CODE {
+                    assert!(
+                        in_ptr < in_end,
+                        "truncated compressed string: escape code at end of input"
+                    );
+                    assert!(
+                        out_ptr.cast_const() < out_end,
+                        "output buffer sized too small"
+                    );
+                    out_ptr.write(in_ptr.read());
+                    in_ptr = in_ptr.add(1);
+                    out_ptr = out_ptr.add(1);
+                } else {
+                    let len = *self.lengths.get_unchecked(code as usize) as usize;
+                    assert!(
+                        out_end.offset_from(out_ptr) >= len as isize,
+                        "output buffer sized too small"
+                    );
+                    let sym = self.symbols.get_unchecked(code as usize).to_u64();
+                    let sym_bytes = sym.to_le_bytes();
+                    std::ptr::copy_nonoverlapping(sym_bytes.as_ptr(), out_ptr, len);
+                    out_ptr = out_ptr.add(len);
                 }
             }
 
@@ -667,7 +701,7 @@ impl Compressor {
         // SAFETY: `end` will point just after the end of the `values` allocation.
         let out_end = unsafe { out_ptr.byte_add(values.capacity()) };
 
-        while (in_ptr as usize) <= in_end_sub8 && out_ptr < out_end {
+        while (in_ptr as usize) <= in_end_sub8 && unsafe { out_end.offset_from(out_ptr) } >= 2 {
             // SAFETY: pointer ranges are checked in the loop condition
             unsafe {
                 // Load a full 8-byte word of data from in_ptr.
@@ -695,7 +729,7 @@ impl Compressor {
         unsafe { std::ptr::copy_nonoverlapping(in_ptr, bytes.as_mut_ptr(), remaining_bytes) };
         let mut last_word = u64::from_le_bytes(bytes);
 
-        while in_ptr < in_end && out_ptr < out_end {
+        while in_ptr < in_end && unsafe { out_end.offset_from(out_ptr) } >= 2 {
             // Load a full 8-byte word of data from in_ptr.
             // SAFETY: caller asserts in_ptr is not null
             let (advance_in, advance_out) = unsafe { self.compress_word(last_word, out_ptr) };
