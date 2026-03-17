@@ -8,8 +8,9 @@ use crate::{
     Code, Compressor, FSST_CODE_BASE, FSST_CODE_MASK, Symbol, advance_8byte_word, compare_masked,
     lossy_pht::LossyPHT,
 };
+use fxhash::FxHashMap;
 use std::cmp::Ordering;
-use std::collections::{BinaryHeap, HashMap};
+use std::collections::BinaryHeap;
 
 /// Bitmap that only works for values up to 512
 #[derive(Clone, Copy, Debug, Default)]
@@ -760,7 +761,8 @@ impl CompressorBuilder {
         // Use a HashMap to deduplicate candidates by symbol content, combining gains
         // when the same symbol is encountered via different codes.
         // This matches the C++ implementation's use of unordered_set<QSymbol> with addOrInc.
-        let mut candidates: HashMap<Symbol, usize> = HashMap::new();
+        // NOTE: we use fxhash since that is the best Rust hasher for 64-bit ints.
+        let mut candidates = FxHashMap::default();
 
         for code1 in counters.first_codes() {
             let symbol1 = self.symbols[code1 as usize];
