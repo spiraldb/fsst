@@ -6,6 +6,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.7](https://github.com/spiraldb/fsst/compare/v0.5.6...v0.5.7) - 2026-03-17
+
+### Fixed
+
+- Handle exactly-sized buffers in `compress_into`/`decompress_into` ([#165](https://github.com/spiraldb/fsst/pull/165))
+
+### Other
+
+- no more duplicate candidate generation ([#181](https://github.com/spiraldb/fsst/pull/181))
+- *(deps)* lock file maintenance ([#180](https://github.com/spiraldb/fsst/pull/180))
+- *(deps)* update swatinem/rust-cache digest to e18b497 ([#179](https://github.com/spiraldb/fsst/pull/179))
+- *(deps)* lock file maintenance ([#178](https://github.com/spiraldb/fsst/pull/178))
+- *(deps)* lock file maintenance ([#176](https://github.com/spiraldb/fsst/pull/176))
+- Remove codspeed walltime benchmark ([#177](https://github.com/spiraldb/fsst/pull/177))
+- Add more micro benchmarks ([#171](https://github.com/spiraldb/fsst/pull/171))
+- *(deps)* update marcoieni/release-plz-action digest to 1528104 ([#170](https://github.com/spiraldb/fsst/pull/170))
+- *(deps)* update codspeedhq/action digest to 281164b ([#169](https://github.com/spiraldb/fsst/pull/169))
+- *(deps)* update actions/upload-artifact action to v7 ([#167](https://github.com/spiraldb/fsst/pull/167))
+- *(deps)* lock file maintenance ([#168](https://github.com/spiraldb/fsst/pull/168))
+- *(deps)* update actions/upload-artifact action to v6 ([#160](https://github.com/spiraldb/fsst/pull/160))
+- *(deps)* lock file maintenance ([#164](https://github.com/spiraldb/fsst/pull/164))
+- *(deps)* update swatinem/rust-cache digest to 779680d ([#157](https://github.com/spiraldb/fsst/pull/157))
+- *(deps)* update actions/checkout digest to de0fac2 ([#158](https://github.com/spiraldb/fsst/pull/158))
+- *(deps)* update codspeedhq/action digest to 2ac5728 ([#162](https://github.com/spiraldb/fsst/pull/162))
+- *(deps)* update marcoieni/release-plz-action digest to f708778 ([#166](https://github.com/spiraldb/fsst/pull/166))
+- *(deps)* update marcoieni/release-plz-action digest to 52440b5 ([#156](https://github.com/spiraldb/fsst/pull/156))
+- *(deps)* lock file maintenance ([#161](https://github.com/spiraldb/fsst/pull/161))
+- *(deps)* lock file maintenance ([#159](https://github.com/spiraldb/fsst/pull/159))
+- *(deps)* update actions/checkout action to v6 ([#154](https://github.com/spiraldb/fsst/pull/154))
+- *(deps)* lock file maintenance ([#155](https://github.com/spiraldb/fsst/pull/155))
+- *(deps)* update codspeedhq/action digest to 346a2d8 ([#152](https://github.com/spiraldb/fsst/pull/152))
+- *(deps)* update actions/checkout digest to 93cb6ef ([#151](https://github.com/spiraldb/fsst/pull/151))
+
 ## [0.5.6](https://github.com/spiraldb/fsst/compare/v0.5.5...v0.5.6) - 2025-11-11
 
 ### Other
