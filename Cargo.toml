@@ -27,7 +27,7 @@ unwrap_in_result = { level = "deny" }
 use_debug = { level = "deny" }
 
 [dependencies]
-fxhash = "0.2"
+rustc-hash = "2.1.1"
 
 [dev-dependencies]
 criterion = { package = "codspeed-criterion-compat", version = "4.0" }
