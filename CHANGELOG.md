@@ -6,6 +6,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.8](https://github.com/spiraldb/fsst/compare/v0.5.7...v0.5.8) - 2026-03-19
+
+### Other
+
+- Use maintained version of fxhash ([#182](https://github.com/spiraldb/fsst/pull/182))
+
 ## [0.5.7](https://github.com/spiraldb/fsst/compare/v0.5.6...v0.5.7) - 2026-03-17
 
 ### Fixed
