@@ -8,7 +8,7 @@ use crate::{
     Code, Compressor, FSST_CODE_BASE, FSST_CODE_MASK, Symbol, advance_8byte_word, compare_masked,
     lossy_pht::LossyPHT,
 };
-use rustc_hash::{FxBuildHasher, FxHashMap, FxHasher};
+use rustc_hash::{FxBuildHasher, FxHashMap};
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
