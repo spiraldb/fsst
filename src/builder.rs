@@ -8,9 +8,9 @@ use crate::{
     Code, Compressor, FSST_CODE_BASE, FSST_CODE_MASK, Symbol, advance_8byte_word, compare_masked,
     lossy_pht::LossyPHT,
 };
-use fxhash::FxHashMap;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
+use rustc_hash::FxHashMap;
 
 /// Bitmap that only works for values up to 512
 #[derive(Clone, Copy, Debug, Default)]
