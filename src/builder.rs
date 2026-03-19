@@ -762,7 +762,7 @@ impl CompressorBuilder {
         // when the same symbol is encountered via different codes.
         // This matches the C++ implementation's use of unordered_set<QSymbol> with addOrInc.
         // NOTE: we use fxhash since that is the best Rust hasher for 64-bit ints.
-        let mut candidates = FxHashMap::with_capacity_and_hasher(256, FxBuildHasher::default());
+        let mut candidates = FxHashMap::with_capacity_and_hasher(256, FxBuildHasher);
 
         for code1 in counters.first_codes() {
             let symbol1 = self.symbols[code1 as usize];
