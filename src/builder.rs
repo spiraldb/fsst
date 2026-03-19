@@ -8,7 +8,7 @@ use crate::{
     Code, Compressor, FSST_CODE_BASE, FSST_CODE_MASK, Symbol, advance_8byte_word, compare_masked,
     lossy_pht::LossyPHT,
 };
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxBuildHasher, FxHashMap, FxHasher};
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
@@ -762,7 +762,7 @@ impl CompressorBuilder {
         // when the same symbol is encountered via different codes.
         // This matches the C++ implementation's use of unordered_set<QSymbol> with addOrInc.
         // NOTE: we use fxhash since that is the best Rust hasher for 64-bit ints.
-        let mut candidates = FxHashMap::default();
+        let mut candidates = FxHashMap::with_capacity_and_hasher(256, FxBuildHasher::default());
 
         for code1 in counters.first_codes() {
             let symbol1 = self.symbols[code1 as usize];
