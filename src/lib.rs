@@ -701,11 +701,8 @@ impl Compressor {
         let in_end_sub8 = in_end as usize - 8;
         // SAFETY: `end` will point just after the end of the `values` allocation.
         let out_end = unsafe { out_ptr.byte_add(values.capacity()) };
-        // Pre-compute the output limit to avoid per-iteration pointer subtraction.
-        // SAFETY: capacity is at least 2 * plaintext.len() >= 2 when plaintext is non-empty.
-        let out_end_sub2 = unsafe { out_end.sub(2) };
 
-        while (in_ptr as usize) <= in_end_sub8 && out_ptr <= out_end_sub2 {
+        while (in_ptr as usize) <= in_end_sub8 && unsafe { out_end.offset_from(out_ptr) } >= 2 {
             // SAFETY: pointer ranges are checked in the loop condition
             unsafe {
                 // Load a full 8-byte word of data from in_ptr.
@@ -733,7 +730,7 @@ impl Compressor {
         unsafe { std::ptr::copy_nonoverlapping(in_ptr, bytes.as_mut_ptr(), remaining_bytes) };
         let mut last_word = u64::from_le_bytes(bytes);
 
-        while in_ptr < in_end && out_ptr <= out_end_sub2 {
+        while in_ptr < in_end && unsafe { out_end.offset_from(out_ptr) } >= 2 {
             // Load a full 8-byte word of data from in_ptr.
             // SAFETY: caller asserts in_ptr is not null
             let (advance_in, advance_out) = unsafe { self.compress_word(last_word, out_ptr) };
