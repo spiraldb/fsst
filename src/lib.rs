@@ -607,7 +607,8 @@ impl Compressor {
         unsafe { out_ptr.byte_add(1).write_unaligned(first_byte) };
 
         // First, check the two_bytes table
-        let code_twobyte = self.codes_two_byte[word as u16 as usize];
+        // SAFETY: codes_two_byte has exactly 65536 entries and `word as u16` is always in [0, 65535].
+        let code_twobyte = unsafe { *self.codes_two_byte.get_unchecked(word as u16 as usize) };
 
         if code_twobyte.code() < self.has_suffix_code {
             // 2 byte code without having to worry about longer matches.
@@ -700,8 +701,11 @@ impl Compressor {
         let in_end_sub8 = in_end as usize - 8;
         // SAFETY: `end` will point just after the end of the `values` allocation.
         let out_end = unsafe { out_ptr.byte_add(values.capacity()) };
+        // Pre-compute the output limit to avoid per-iteration pointer subtraction.
+        // SAFETY: capacity is at least 2 * plaintext.len() >= 2 when plaintext is non-empty.
+        let out_end_sub2 = unsafe { out_end.sub(2) };
 
-        while (in_ptr as usize) <= in_end_sub8 && unsafe { out_end.offset_from(out_ptr) } >= 2 {
+        while (in_ptr as usize) <= in_end_sub8 && out_ptr <= out_end_sub2 {
             // SAFETY: pointer ranges are checked in the loop condition
             unsafe {
                 // Load a full 8-byte word of data from in_ptr.
@@ -729,7 +733,7 @@ impl Compressor {
         unsafe { std::ptr::copy_nonoverlapping(in_ptr, bytes.as_mut_ptr(), remaining_bytes) };
         let mut last_word = u64::from_le_bytes(bytes);
 
-        while in_ptr < in_end && unsafe { out_end.offset_from(out_ptr) } >= 2 {
+        while in_ptr < in_end && out_ptr <= out_end_sub2 {
             // Load a full 8-byte word of data from in_ptr.
             // SAFETY: caller asserts in_ptr is not null
             let (advance_in, advance_out) = unsafe { self.compress_word(last_word, out_ptr) };
