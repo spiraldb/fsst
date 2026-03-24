@@ -84,6 +84,20 @@ fn test_chinese() {
 }
 
 #[test]
+fn test_all_escape_roundtrip() {
+    // Empty symbol table: every byte is encoded as ESCAPE + raw byte.
+    let compressor = CompressorBuilder::new().build();
+    let decompressor = compressor.decompressor();
+
+    // Large enough to exercise the 8-byte block loop in decompress_into.
+    let input: Vec<u8> = (0..=255u8).cycle().take(4096).collect();
+    let compressed = compressor.compress(&input);
+    // All-escape compressed size should be exactly 2x input.
+    assert_eq!(compressed.len(), input.len() * 2);
+    assert_eq!(decompressor.decompress(&compressed), input);
+}
+
+#[test]
 fn test_large_with_rebuild() {
     let corpus: Vec<u8> = DECLARATION.bytes().cycle().take(10_240).collect();
 
