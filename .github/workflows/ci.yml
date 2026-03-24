@@ -26,6 +26,21 @@ jobs:
       - name: Rust Test
         run: cargo test --workspace --all-features
 
+  msrv:
+    name: MSRV Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - name: Get MSRV
+        id: msrv
+        run: echo "version=$(cargo metadata --format-version 1 --no-deps | jq -r '.packages[0].rust_version')" >> $GITHUB_OUTPUT
+      - name: Install MSRV Toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "${{ steps.msrv.outputs.version }}"
+      - name: Rust Build
+        run: cargo build --all-features --all-targets
+
   bench-codspeed:
     name: Benchmark with Codspeed
     runs-on: ubuntu-latest
