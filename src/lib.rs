@@ -238,7 +238,7 @@ impl<'a> Decompressor<'a> {
     ///
     /// # Panics
     ///
-    /// If the provided symbol table has length greater than 256
+    /// If the provided symbol table has length greater than or equal to [FSST_CODE_BASE]
     pub fn new(symbols: &'a [Symbol], lengths: &'a [u8]) -> Self {
         assert!(
             symbols.len() < FSST_CODE_BASE as usize,
@@ -255,13 +255,13 @@ impl<'a> Decompressor<'a> {
 
     /// Decompress a slice of codes into a provided buffer.
     ///
-    /// The provided `decoded` buffer must be at least the size of the decoded data, plus
-    /// an additional 7 bytes.
+    /// The provided `decoded` buffer must be at least the size of the decoded data.
     ///
     /// ## Panics
     ///
-    /// If the caller fails to provide sufficient capacity in the decoded buffer. An upper bound
-    /// on the required capacity can be obtained by calling [`Self::max_decompression_capacity`].
+    /// If the caller fails to provide sufficient capacity in the decoded buffer.
+    /// The smallest the decoded buffer can be is half the compressed buffer length.
+    /// An upper bound on the required capacity can be obtained by calling [`Self::max_decompression_capacity`].
     ///
     /// ## Example
     ///
@@ -275,7 +275,7 @@ impl<'a> Decompressor<'a> {
     ///
     /// let decompressor = compressor.decompressor();
     ///
-    /// let mut decompressed = Vec::with_capacity(8 + 7);
+    /// let mut decompressed = Vec::with_capacity(8);
     ///
     /// let len = decompressor.decompress_into(&[0], decompressed.spare_capacity_mut());
     /// assert_eq!(len, 8);
@@ -537,7 +537,7 @@ impl<'a> Decompressor<'a> {
     /// Decompress a byte slice that was previously returned by a compressor using the same symbol
     /// table into a new vector of bytes.
     pub fn decompress(&self, compressed: &[u8]) -> Vec<u8> {
-        let mut decoded = Vec::with_capacity(self.max_decompression_capacity(compressed) + 7);
+        let mut decoded = Vec::with_capacity(self.max_decompression_capacity(compressed));
 
         let len = self.decompress_into(compressed, decoded.spare_capacity_mut());
         // SAFETY: len bytes have now been initialized by the decompressor.
