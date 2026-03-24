@@ -607,7 +607,8 @@ impl Compressor {
         unsafe { out_ptr.byte_add(1).write_unaligned(first_byte) };
 
         // First, check the two_bytes table
-        let code_twobyte = self.codes_two_byte[word as u16 as usize];
+        // SAFETY: codes_two_byte has exactly 65536 entries and `word as u16` is always in [0, 65535].
+        let code_twobyte = unsafe { *self.codes_two_byte.get_unchecked(word as u16 as usize) };
 
         if code_twobyte.code() < self.has_suffix_code {
             // 2 byte code without having to worry about longer matches.
