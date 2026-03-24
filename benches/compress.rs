@@ -1,7 +1,7 @@
 //! Benchmarks for FSST compression, decompression, and symbol table training.
 //!
 //! We use the dbtext data at https://github.com/cwida/fsst/tree/master/paper/dbtext
-#![allow(missing_docs)]
+#![allow(missing_docs, clippy::unwrap_in_result)]
 use core::str;
 use std::{
     error::Error,
