@@ -6,6 +6,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.9](https://github.com/spiraldb/fsst/compare/v0.5.8...v0.5.9) - 2026-03-24
+
+### Other
+
+- Batch all-escaped blocks ([#188](https://github.com/spiraldb/fsst/pull/188))
+- Reduce bound checking and pointer arithmetic during compression ([#187](https://github.com/spiraldb/fsst/pull/187))
+- *(deps)* lock file maintenance ([#185](https://github.com/spiraldb/fsst/pull/185))
+- *(deps)* update codspeedhq/action digest to 1c8ae48 ([#184](https://github.com/spiraldb/fsst/pull/184))
+
 ## [0.5.8](https://github.com/spiraldb/fsst/compare/v0.5.7...v0.5.8) - 2026-03-19
 
 ### Other
