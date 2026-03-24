@@ -204,6 +204,24 @@ fn bench_compress(c: &mut Criterion) {
     });
     group.finish();
 
+    let mut group = c.benchmark_group("all-escape");
+    let test_string = one_megabyte(b"abcdefgh");
+    group.throughput(Throughput::Bytes(test_string.len() as u64));
+    // Empty symbol table: every byte becomes ESCAPE + raw byte.
+    let escape_compressor = CompressorBuilder::new().build();
+    group.bench_function("compress", |b| {
+        b.iter(|| unsafe {
+            escape_compressor.compress_into(&test_string, &mut output_buf);
+        })
+    });
+
+    let compressed_escape = escape_compressor.compress(&test_string);
+    let escape_decompressor = escape_compressor.decompressor();
+    group.bench_function("decompress", |b| {
+        b.iter(|| escape_decompressor.decompress(&compressed_escape))
+    });
+    group.finish();
+
     let _ = std::hint::black_box(output_buf);
 }
 
