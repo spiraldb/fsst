@@ -341,6 +341,15 @@ impl<'a> Decompressor<'a> {
                         let code = ((next_block >> 56) & 0xFF) as u8;
                         store_next_symbol!(code);
                         in_ptr = in_ptr.add(8);
+                    } else if (next_block & 0x00FF00FF00FF00FF) == 0x00FF00FF00FF00FF {
+                        // All 4 even-positioned bytes are ESCAPE_CODE.
+                        // Batch-extract the 4 raw bytes at odd positions.
+                        out_ptr.write(((next_block >> 8) & 0xFF) as u8);
+                        out_ptr.add(1).write(((next_block >> 24) & 0xFF) as u8);
+                        out_ptr.add(2).write(((next_block >> 40) & 0xFF) as u8);
+                        out_ptr.add(3).write(((next_block >> 56) & 0xFF) as u8);
+                        out_ptr = out_ptr.add(4);
+                        in_ptr = in_ptr.add(8);
                     } else {
                         // Otherwise, find the first escape code and write the symbols up to that point.
                         let first_escape_pos = escape_mask.trailing_zeros() >> 3; // Divide bits to bytes
