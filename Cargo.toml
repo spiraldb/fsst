@@ -46,6 +46,14 @@ harness = false
 name = "micro"
 harness = false
 
+[[bench]]
+name = "compress12"
+harness = false
+
+[[bench]]
+name = "micro12"
+harness = false
+
 [[test]]
 name = "correctness"
 test = true
