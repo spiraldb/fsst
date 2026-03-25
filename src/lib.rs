@@ -238,7 +238,7 @@ impl<'a> Decompressor<'a> {
     ///
     /// # Panics
     ///
-    /// If the provided symbol table has length greater than or equal to [FSST_CODE_BASE]
+    /// If the provided symbol table has length greater than or equal to [`FSST_CODE_BASE`]
     pub fn new(symbols: &'a [Symbol], lengths: &'a [u8]) -> Self {
         assert!(
             symbols.len() < FSST_CODE_BASE as usize,
