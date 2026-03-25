@@ -238,7 +238,7 @@ impl<'a> Decompressor<'a> {
     ///
     /// # Panics
     ///
-    /// If the provided symbol table has length greater than 256
+    /// If the provided symbol table has length greater than or equal to [`FSST_CODE_BASE`]
     pub fn new(symbols: &'a [Symbol], lengths: &'a [u8]) -> Self {
         assert!(
             symbols.len() < FSST_CODE_BASE as usize,
@@ -255,13 +255,12 @@ impl<'a> Decompressor<'a> {
 
     /// Decompress a slice of codes into a provided buffer.
     ///
-    /// The provided `decoded` buffer must be at least the size of the decoded data, plus
-    /// an additional 7 bytes.
+    /// The provided `decoded` buffer must be at least the size of the decoded data.
     ///
     /// ## Panics
     ///
-    /// If the caller fails to provide sufficient capacity in the decoded buffer. An upper bound
-    /// on the required capacity can be obtained by calling [`Self::max_decompression_capacity`].
+    /// If the caller fails to provide sufficient capacity in the decoded buffer.
+    /// An upper bound on the required capacity can be obtained by calling [`Self::max_decompression_capacity`].
     ///
     /// ## Example
     ///
@@ -275,7 +274,7 @@ impl<'a> Decompressor<'a> {
     ///
     /// let decompressor = compressor.decompressor();
     ///
-    /// let mut decompressed = Vec::with_capacity(8 + 7);
+    /// let mut decompressed = Vec::with_capacity(8);
     ///
     /// let len = decompressor.decompress_into(&[0], decompressed.spare_capacity_mut());
     /// assert_eq!(len, 8);
