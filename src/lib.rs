@@ -260,7 +260,6 @@ impl<'a> Decompressor<'a> {
     /// ## Panics
     ///
     /// If the caller fails to provide sufficient capacity in the decoded buffer.
-    /// The smallest the decoded buffer can be is half the compressed buffer length.
     /// An upper bound on the required capacity can be obtained by calling [`Self::max_decompression_capacity`].
     ///
     /// ## Example
