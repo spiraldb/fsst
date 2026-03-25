@@ -537,7 +537,7 @@ impl<'a> Decompressor<'a> {
     /// Decompress a byte slice that was previously returned by a compressor using the same symbol
     /// table into a new vector of bytes.
     pub fn decompress(&self, compressed: &[u8]) -> Vec<u8> {
-        let mut decoded = Vec::with_capacity(self.max_decompression_capacity(compressed));
+        let mut decoded = Vec::with_capacity(self.max_decompression_capacity(compressed) + 7);
 
         let len = self.decompress_into(compressed, decoded.spare_capacity_mut());
         // SAFETY: len bytes have now been initialized by the decompressor.
