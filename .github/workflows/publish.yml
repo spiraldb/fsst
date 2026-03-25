@@ -15,7 +15,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
       - uses: ./.github/actions/setup-rust
       - name: Install cargo-edit
-        uses: taiki-e/cache-cargo-install-action@24c4eaa867646941dd8cd6f08c1497ea68d732ba
+        uses: taiki-e/cache-cargo-install-action@7824a3d828d84688fd069e57300b218c7b81eefa
         with:
           tool: cargo-edit
 
