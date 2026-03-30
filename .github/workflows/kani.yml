@@ -1,0 +1,22 @@
+name: Kani
+
+on:
+  push:
+    branches: ["develop"]
+  pull_request: {}
+  workflow_dispatch: {}
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  kani:
+    name: "kani"
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Kani verification
+        uses: model-checking/kani-github-action@v1.1
+        with:
+          args: --output-format terse

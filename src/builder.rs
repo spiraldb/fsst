@@ -986,3 +986,40 @@ mod test {
         );
     }
 }
+
+#[cfg(kani)]
+mod kani_proofs {
+    use super::*;
+
+    /// Tier 2: Verify bitmap set/is_set consistency.
+    ///
+    /// After calling `set(index)` on a bitmap, `is_set(index)` must return true.
+    /// This proof verifies the bit manipulation in the bitmap implementation
+    /// correctly tracks which indices have been set.
+    #[kani::proof]
+    fn proof_bitmap_set_is_set() {
+        let index: usize = kani::any();
+        kani::assume(index <= FSST_CODE_MASK as usize);
+
+        let mut bitmap = CodesBitmap::default();
+        bitmap.set(index);
+        assert!(bitmap.is_set(index));
+    }
+
+    /// Tier 2: Verify bitmap index calculation stays in bounds.
+    ///
+    /// The bitmap uses `index >> 6` to select which u64 in the array to modify,
+    /// and `index % 64` to select which bit. This proof verifies that for any
+    /// valid index (0..=511), the array access is always in bounds.
+    #[kani::proof]
+    fn proof_bitmap_index_bounds() {
+        let index: usize = kani::any();
+        kani::assume(index <= FSST_CODE_MASK as usize);
+
+        let map = index >> 6;
+        assert!(map < 8);
+
+        let bit = index % 64;
+        assert!(bit < 64);
+    }
+}

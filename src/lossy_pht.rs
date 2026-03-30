@@ -126,3 +126,21 @@ impl Default for LossyPHT {
         Self::new()
     }
 }
+
+#[cfg(kani)]
+mod kani_proofs {
+    use super::*;
+
+    /// Tier 2: Verify hash slot calculation always produces in-bounds index.
+    ///
+    /// The hash table lookup uses `fsst_hash(prefix_3bytes) & (HASH_TABLE_SIZE - 1)`
+    /// to compute the slot index. This proof verifies that for any input word,
+    /// the computed slot is always less than HASH_TABLE_SIZE.
+    #[kani::proof]
+    fn proof_hash_slot_bounds() {
+        let word: u64 = kani::any();
+        let prefix_3bytes = word & 0xFF_FF_FF;
+        let slot = fsst_hash(prefix_3bytes) as usize & (HASH_TABLE_SIZE - 1);
+        assert!(slot < HASH_TABLE_SIZE);
+    }
+}

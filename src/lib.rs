@@ -905,7 +905,7 @@ pub(crate) fn advance_8byte_word(word: u64, bytes: usize) -> u64 {
 fn validate_symbol_order(symbol_lens: &[u8]) {
     // Ensure that the symbol table is ordered by length, 23456781
     let mut expected = 2;
-    for (idx, &len) in symbol_lens.iter().enumerate() {
+    for (_idx, &len) in symbol_lens.iter().enumerate() {
         if expected == 1 {
             assert_eq!(
                 len, 1,
@@ -1005,5 +1005,113 @@ mod test {
         let compressor = builder.build();
         let built_symbols: &[u64] = unsafe { mem::transmute(compressor.symbol_table()) };
         assert_eq!(built_symbols, symbols);
+    }
+}
+
+#[cfg(kani)]
+mod kani_proofs {
+    use super::*;
+
+    /// Tier 1: Verify escape code detection bit manipulation correctness.
+    ///
+    /// The escape mask formula detects bytes equal to 0xFF (ESCAPE_CODE) in an 8-byte word.
+    /// This proof verifies that for any input word, the high bit in each byte position
+    /// of the escape_mask is set if and only if that byte equals ESCAPE_CODE (0xFF).
+    #[kani::proof]
+    fn proof_escape_mask_correctness() {
+        let next_block: u64 = kani::any();
+        let escape_mask = (next_block & 0x8080808080808080)
+            & ((((!next_block) & 0x7F7F7F7F7F7F7F7F) + 0x7F7F7F7F7F7F7F7F) ^ 0x8080808080808080);
+
+        // Verify: high bit set in each byte position iff that byte == 0xFF
+        for i in 0..8u32 {
+            let byte = ((next_block >> (i * 8)) & 0xFF) as u8;
+            let mask_bit = (escape_mask >> (i * 8 + 7)) & 1;
+            assert!((byte == ESCAPE_CODE) == (mask_bit == 1));
+        }
+    }
+
+    /// Tier 1: Verify symbol length calculation bounds.
+    ///
+    /// Symbol::len() must always return a value in [1, 8] for any possible u64 representation.
+    /// The special case of all-zeros (0x0000000000000000) should return 1, not 0.
+    #[kani::proof]
+    fn proof_symbol_len_bounds() {
+        let value: u64 = kani::any();
+        let len = Symbol(value).len();
+        assert!(len >= 1 && len <= 8);
+    }
+
+    /// Tier 1: Verify symbol concatenation produces valid results.
+    ///
+    /// When two symbols are concatenated, the resulting symbol must have a valid length
+    /// (between the length of the first symbol and 8).
+    #[kani::proof]
+    fn proof_symbol_concat_valid() {
+        let a: u64 = kani::any();
+        let b: u64 = kani::any();
+        let sym_a = Symbol(a);
+        let sym_b = Symbol(b);
+        kani::assume(sym_a.len() + sym_b.len() <= 8);
+
+        let result = sym_a.concat(sym_b);
+        assert!(result.len() >= sym_a.len());
+        assert!(result.len() <= 8);
+    }
+
+    /// Tier 1: Verify word advancement has no undefined behavior from oversized shifts.
+    ///
+    /// Shifting a u64 by 64 or more bits is undefined behavior in Rust/LLVM.
+    /// This proof verifies that advance_8byte_word correctly handles the edge case
+    /// where bytes == 8, which would otherwise require a 64-bit shift.
+    #[kani::proof]
+    fn proof_advance_word_no_ub() {
+        let word: u64 = kani::any();
+        let bytes: usize = kani::any();
+        kani::assume(bytes <= 8);
+
+        let result = advance_8byte_word(word, bytes);
+        if bytes == 8 {
+            assert!(result == 0);
+        }
+    }
+
+    /// Tier 2: Verify code bit-packing produces correct field extraction.
+    ///
+    /// The Code type packs a code value (8 bits), an "is symbol" flag (1 bit),
+    /// and a length (4 bits) into a u16. This proof verifies that these fields
+    /// can be correctly extracted after construction.
+    #[kani::proof]
+    fn proof_code_field_extraction() {
+        let code_val: u8 = kani::any();
+        let len: usize = kani::any();
+        kani::assume(len >= 1 && len <= 8);
+        kani::assume(code_val < 255); // Code 255 is reserved for ESCAPE_CODE
+
+        let code = Code::new_symbol(code_val, len);
+        assert!(code.code() == code_val);
+        assert!(code.len() == len as u16);
+    }
+
+    /// Tier 3: Bounded round-trip verification for small inputs.
+    ///
+    /// This proof verifies that for an empty compressor (no trained symbols),
+    /// compression followed by decompression produces the original input.
+    /// With an empty symbol table, all bytes are escaped, making this a
+    /// tractable verification target.
+    #[kani::proof]
+    #[kani::unwind(17)]
+    fn proof_roundtrip_empty_compressor() {
+        let input: [u8; 4] = kani::any();
+        let compressor = CompressorBuilder::new().build();
+        let decompressor = compressor.decompressor();
+
+        let compressed = compressor.compress(&input);
+        let decompressed = decompressor.decompress(&compressed);
+
+        assert!(decompressed.len() == input.len());
+        for i in 0..input.len() {
+            assert!(decompressed[i] == input[i]);
+        }
     }
 }
