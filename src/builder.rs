@@ -29,7 +29,8 @@ impl CodesBitmap {
         );
 
         let map = index >> 6;
-        self.codes[map] |= 1 << (index % 64);
+        // SAFETY: index <= FSST_CODE_MASK (511), so map <= 7, and codes has 8 entries.
+        unsafe { *self.codes.get_unchecked_mut(map) |= 1 << (index % 64) };
     }
 
     /// Check if `index` is present in the bitmap
@@ -40,7 +41,8 @@ impl CodesBitmap {
         );
 
         let map = index >> 6;
-        self.codes[map] & (1 << (index % 64)) != 0
+        // SAFETY: index <= FSST_CODE_MASK (511), so map <= 7, and codes has 8 entries.
+        (unsafe { *self.codes.get_unchecked(map) }) & (1 << (index % 64)) != 0
     }
 
     /// Get all codes set in this bitmap
@@ -156,13 +158,15 @@ impl Counter {
     #[inline]
     fn record_count1(&mut self, code1: u16) {
         // If not set, we want to start at one.
+        // SAFETY: code1 is an extended code (9 bits, <= FSST_CODE_MASK = 511),
+        // and counts1 has COUNTS1_SIZE (512) entries.
         let base = if self.code1_index.is_set(code1 as usize) {
-            self.counts1[code1 as usize]
+            unsafe { *self.counts1.get_unchecked(code1 as usize) }
         } else {
             0
         };
 
-        self.counts1[code1 as usize] = base + 1;
+        unsafe { *self.counts1.get_unchecked_mut(code1 as usize) = base + 1 };
         self.code1_index.set(code1 as usize);
     }
 
@@ -172,19 +176,28 @@ impl Counter {
         debug_assert!(self.code1_index.is_set(code2 as usize));
 
         let idx = (code1 as usize) * COUNTS1_SIZE + (code2 as usize);
-        if self.pair_index[code1 as usize].is_set(code2 as usize) {
-            self.counts2[idx] += 1;
-        } else {
-            self.counts2[idx] = 1;
+        // SAFETY: code1 and code2 are extended codes (<= FSST_CODE_MASK = 511).
+        // pair_index has COUNTS1_SIZE (512) entries, counts2 has COUNTS1_SIZE^2 (262144) entries.
+        // idx = code1 * 512 + code2 <= 511 * 512 + 511 = 262143 < 262144.
+        unsafe {
+            let pair_entry = self
+                .pair_index
+                .get_unchecked(code1 as usize)
+                .is_set(code2 as usize);
+            let slot = self.counts2.get_unchecked_mut(idx);
+            *slot = if pair_entry { *slot + 1 } else { 1 };
+            self.pair_index
+                .get_unchecked_mut(code1 as usize)
+                .set(code2 as usize);
         }
-        self.pair_index[code1 as usize].set(code2 as usize);
     }
 
     #[inline]
     fn count1(&self, code1: u16) -> usize {
         debug_assert!(self.code1_index.is_set(code1 as usize));
 
-        self.counts1[code1 as usize]
+        // SAFETY: code1 <= FSST_CODE_MASK (511), counts1 has COUNTS1_SIZE (512) entries.
+        unsafe { *self.counts1.get_unchecked(code1 as usize) }
     }
 
     #[inline]
@@ -194,7 +207,8 @@ impl Counter {
         debug_assert!(self.pair_index[code1 as usize].is_set(code2 as usize));
 
         let idx = (code1 as usize) * 512 + (code2 as usize);
-        self.counts2[idx]
+        // SAFETY: idx <= 511 * 512 + 511 = 262143 < COUNTS2_SIZE (262144).
+        unsafe { *self.counts2.get_unchecked(idx) }
     }
 
     /// Returns an ordered iterator over the codes that were observed
@@ -209,7 +223,8 @@ impl Counter {
     /// This is the set of all values `code2` where there was
     /// previously a call to `self.record_count2(code1, code2)`.
     fn second_codes(&self, code1: u16) -> CodesIterator<'_> {
-        self.pair_index[code1 as usize].codes()
+        // SAFETY: code1 <= FSST_CODE_MASK (511), pair_index has COUNTS1_SIZE (512) entries.
+        unsafe { self.pair_index.get_unchecked(code1 as usize) }.codes()
     }
 
     /// Clear the counters.
@@ -642,13 +657,15 @@ impl CompressorBuilder {
         }
 
         // Try and match first two bytes
-        let twobyte = self.codes_two_byte[word as u16 as usize];
+        // SAFETY: word as u16 is always in [0, 65535], and codes_two_byte has 65536 entries.
+        let twobyte = unsafe { *self.codes_two_byte.get_unchecked(word as u16 as usize) };
         if twobyte.extended_code() >= FSST_CODE_BASE {
             return twobyte;
         }
 
         // Fall back to single-byte match
-        self.codes_one_byte[word as u8 as usize]
+        // SAFETY: word as u8 is always in [0, 255], and codes_one_byte has 256+ entries.
+        unsafe { *self.codes_one_byte.get_unchecked(word as u8 as usize) }
     }
 
     /// Compress the text using the current symbol table. Count the code occurrences
@@ -687,7 +704,9 @@ impl CompressorBuilder {
             // Also record the count for just extending by a single byte, but only if
             // the symbol is not itself a single byte.
             if code.len() > 1 {
-                let code_first_byte = self.symbols[code_u16 as usize].first_byte() as u16;
+                // SAFETY: code_u16 is an extended code (<= FSST_CODE_MASK = 511), symbols has 511 entries.
+                let code_first_byte =
+                    unsafe { self.symbols.get_unchecked(code_u16 as usize) }.first_byte() as u16;
                 counter.record_count1(code_first_byte);
                 counter.record_count2(prev_code, code_first_byte);
             }
@@ -734,7 +753,9 @@ impl CompressorBuilder {
             // Also record the count for just extending by a single byte, but only if
             // the symbol is not itself a single byte.
             if code.len() > 1 {
-                let code_first_byte = self.symbols[code_u16 as usize].first_byte() as u16;
+                // SAFETY: code_u16 is an extended code (<= FSST_CODE_MASK = 511), symbols has 511 entries.
+                let code_first_byte =
+                    unsafe { self.symbols.get_unchecked(code_u16 as usize) }.first_byte() as u16;
                 counter.record_count1(code_first_byte);
                 counter.record_count2(prev_code, code_first_byte);
             }
@@ -765,7 +786,9 @@ impl CompressorBuilder {
         let mut candidates = FxHashMap::with_capacity_and_hasher(256, FxBuildHasher);
 
         for code1 in counters.first_codes() {
-            let symbol1 = self.symbols[code1 as usize];
+            // SAFETY: code1 is from the bitmap iterator and <= FSST_CODE_MASK (511),
+            // symbols has 511 entries.
+            let symbol1 = unsafe { *self.symbols.get_unchecked(code1 as usize) };
             let symbol1_len = symbol1.len();
             let count = counters.count1(code1);
 
@@ -791,7 +814,8 @@ impl CompressorBuilder {
             }
 
             for code2 in counters.second_codes(code1) {
-                let symbol2 = self.symbols[code2 as usize];
+                // SAFETY: code2 is from the bitmap iterator and <= FSST_CODE_MASK (511).
+                let symbol2 = unsafe { *self.symbols.get_unchecked(code2 as usize) };
 
                 // If merging would yield a symbol of length greater than 8, skip.
                 if symbol1_len + symbol2.len() > 8 {
