@@ -138,14 +138,10 @@ const COUNTS2_SIZE: usize = COUNTS1_SIZE * COUNTS1_SIZE;
 
 impl Counter {
     fn new() -> Self {
-        let mut counts1 = Vec::with_capacity(COUNTS1_SIZE);
-        let mut counts2 = Vec::with_capacity(COUNTS2_SIZE);
-        // SAFETY: all accesses to the vector go through the bitmap to ensure no uninitialized
-        //  data is ever read from these vectors.
-        unsafe {
-            counts1.set_len(COUNTS1_SIZE);
-            counts2.set_len(COUNTS2_SIZE);
-        }
+        // Zero-initialize counts1 (4KB) so record_count1 can be branchless.
+        let counts1 = vec![0usize; COUNTS1_SIZE];
+        // Zero-initialize counts2 (2MB) so record_count2 can be branchless.
+        let counts2 = vec![0usize; COUNTS2_SIZE];
 
         Self {
             counts1,
@@ -157,16 +153,10 @@ impl Counter {
 
     #[inline]
     fn record_count1(&mut self, code1: u16) {
-        // If not set, we want to start at one.
         // SAFETY: code1 is an extended code (9 bits, <= FSST_CODE_MASK = 511),
-        // and counts1 has COUNTS1_SIZE (512) entries.
-        let base = if self.code1_index.is_set(code1 as usize) {
-            unsafe { *self.counts1.get_unchecked(code1 as usize) }
-        } else {
-            0
-        };
-
-        unsafe { *self.counts1.get_unchecked_mut(code1 as usize) = base + 1 };
+        // and counts1 has COUNTS1_SIZE (512) entries. Branchless: counts1 is zero-initialized
+        // and zeroed per-entry in clear(), so we can always read-then-increment.
+        unsafe { *self.counts1.get_unchecked_mut(code1 as usize) += 1 };
         self.code1_index.set(code1 as usize);
     }
 
@@ -179,13 +169,9 @@ impl Counter {
         // SAFETY: code1 and code2 are extended codes (<= FSST_CODE_MASK = 511).
         // pair_index has COUNTS1_SIZE (512) entries, counts2 has COUNTS1_SIZE^2 (262144) entries.
         // idx = code1 * 512 + code2 <= 511 * 512 + 511 = 262143 < 262144.
+        // Branchless: counts2 is zero-initialized and zeroed per-entry in clear().
         unsafe {
-            let pair_entry = self
-                .pair_index
-                .get_unchecked(code1 as usize)
-                .is_set(code2 as usize);
-            let slot = self.counts2.get_unchecked_mut(idx);
-            *slot = if pair_entry { *slot + 1 } else { 1 };
+            *self.counts2.get_unchecked_mut(idx) += 1;
             self.pair_index
                 .get_unchecked_mut(code1 as usize)
                 .set(code2 as usize);
@@ -228,8 +214,17 @@ impl Counter {
     }
 
     /// Clear the counters.
-    /// Note that this just touches the bitmaps and sets them all to invalid.
+    /// Zeroes only the entries that were actually used (tracked by bitmaps),
+    /// then clears the bitmaps. This keeps record_count1/record_count2 branchless
+    /// without paying for a full 2MB memset each generation.
     fn clear(&mut self) {
+        for code1 in self.code1_index.codes() {
+            self.counts1[code1 as usize] = 0;
+            for code2 in self.pair_index[code1 as usize].codes() {
+                let idx = (code1 as usize) * COUNTS1_SIZE + (code2 as usize);
+                self.counts2[idx] = 0;
+            }
+        }
         self.code1_index.clear();
         for index in &mut self.pair_index {
             index.clear();
