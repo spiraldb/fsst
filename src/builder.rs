@@ -6,7 +6,7 @@
 
 use crate::{
     Code, Compressor, FSST_CODE_BASE, FSST_CODE_MASK, Symbol, advance_8byte_word, compare_masked,
-    lossy_pht::LossyPHT,
+    load_suffix_word, lossy_pht::LossyPHT,
 };
 use rustc_hash::{FxBuildHasher, FxHashMap};
 use std::cmp::Ordering;
@@ -724,16 +724,16 @@ impl CompressorBuilder {
         );
         let remaining_bytes = remaining_bytes as usize;
 
-        // Load the last `remaining_byte`s of data into a final world. We then replicate the loop above,
+        // Load the last `remaining_byte`s of data into a final word. We then replicate the loop above,
         // but shift data out of this word rather than advancing an input pointer and potentially reading
-        // unowned memory
-        let mut bytes = [0u8; 8];
-        unsafe {
-            // SAFETY: it is safe to read up to remaining_bytes from in_ptr, and remaining_bytes
-            //  will be <= 8 bytes.
-            std::ptr::copy_nonoverlapping(in_ptr, bytes.as_mut_ptr(), remaining_bytes);
-        }
-        let mut last_word = u64::from_le_bytes(bytes);
+        // unowned memory.
+        //
+        // SAFETY: remaining_bytes is in 0..=7, in_end is one-past-end of sample.
+        let mut last_word = if remaining_bytes > 0 {
+            unsafe { load_suffix_word(in_end, remaining_bytes, sample.len()) }
+        } else {
+            0
+        };
 
         let mut remaining_bytes = remaining_bytes;
 

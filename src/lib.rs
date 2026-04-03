@@ -730,13 +730,16 @@ impl Compressor {
 
         let remaining_bytes = remaining_bytes as usize;
 
-        // Load the last `remaining_byte`s of data into a final world. We then replicate the loop above,
+        // Load the last `remaining_byte`s of data into a final word. We then replicate the loop above,
         // but shift data out of this word rather than advancing an input pointer and potentially reading
         // unowned memory.
-        let mut bytes = [0u8; 8];
-        // SAFETY: remaining_bytes <= 8
-        unsafe { std::ptr::copy_nonoverlapping(in_ptr, bytes.as_mut_ptr(), remaining_bytes) };
-        let mut last_word = u64::from_le_bytes(bytes);
+        //
+        // SAFETY: remaining_bytes is in 0..=7, in_end is one-past-end of plaintext.
+        let mut last_word = if remaining_bytes > 0 {
+            unsafe { load_suffix_word(in_end, remaining_bytes, plaintext.len()) }
+        } else {
+            0
+        };
 
         while in_ptr < in_end && unsafe { out_end.offset_from(out_ptr) } >= 2 {
             // Load a full 8-byte word of data from in_ptr.
@@ -889,6 +892,45 @@ impl Compressor {
             lossy_pht,
             has_suffix_code,
         }
+    }
+}
+
+/// Load the last `remaining` bytes (1-8) from a buffer into a u64 without calling memcpy.
+///
+/// When `total_len >= 8`, uses an overlapping 8-byte read from the end of the buffer
+/// and shifts out the already-processed prefix. For short buffers (< 8 bytes), loads
+/// bytes individually to avoid reading out of bounds.
+///
+/// # Safety
+///
+/// `in_end` must point one-past-the-end of a valid buffer of length `total_len`.
+/// `remaining` must be in `1..=8` and `remaining <= total_len`.
+#[inline]
+pub(crate) unsafe fn load_suffix_word(
+    in_end: *const u8,
+    remaining: usize,
+    total_len: usize,
+) -> u64 {
+    debug_assert!(remaining <= 8 && remaining >= 1);
+    debug_assert!(remaining <= total_len);
+
+    if total_len >= 8 {
+        // Read 8 bytes ending at in_end. This overlaps with already-processed data,
+        // but we shift those bytes out. Avoids a memcpy call for small copies.
+        let word = unsafe { (in_end.sub(8) as *const u64).read_unaligned() };
+        if remaining == 8 {
+            word
+        } else {
+            word >> (8 * (8 - remaining))
+        }
+    } else {
+        // Short buffer: can't safely read 8 bytes, load byte-by-byte.
+        let in_ptr = unsafe { in_end.sub(remaining) };
+        let mut word = 0u64;
+        for i in 0..remaining {
+            word |= (unsafe { *in_ptr.add(i) } as u64) << (8 * i);
+        }
+        word
     }
 }
 
