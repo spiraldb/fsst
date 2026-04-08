@@ -117,3 +117,36 @@ fn test_large_with_rebuild() {
         DECLARATION,
     );
 }
+
+#[test]
+fn test_pruning_small_input() {
+    // 'a' × 100 plus bytes 200..210 appearing once each.
+    // Without pruning, the count >= 5 filter drops the rare bytes.
+    // With pruning, the count threshold is lowered to 1, but
+    // saves (1) <= cost (1+1=2) still filters them out.
+    // Bytes 0xFF appears 3 times: passes the lowered threshold,
+    // AND saves (3) > cost (2), so pruning keeps it.
+    // This proves the pruning path is active: 0xFF would be dropped
+    // by the normal count >= 5 filter but survives via pruning.
+    let mut corpus = vec![b'a'; 100];
+    corpus.extend(200u8..210);
+    corpus.extend([0xFF, 0xFF, 0xFF]);
+
+    // Use multiple sample lines so earlier training generations see data.
+    let compressor = Compressor::train(&vec![&corpus[..30], &corpus[30..60], &corpus[60..]]);
+
+    // 0xFF (count=3) survives: pruning lowers the count threshold to 1,
+    // and saves (3) > cost (2). Bytes 200..210 (count=1) are pruned.
+    assert_eq!(
+        compressor.symbol_table(),
+        &[
+            Symbol::from_slice(b"aa\0\0\0\0\0\0"),
+            Symbol::from_slice(b"aaaaaaaa"),
+            Symbol::from_u8(b'a'),
+            Symbol::from_u8(0xFF),
+        ],
+    );
+
+    let compressed = compressor.compress(&corpus);
+    assert_eq!(compressor.decompressor().decompress(&compressed), corpus);
+}

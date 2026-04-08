@@ -529,7 +529,11 @@ const FSST_SAMPLELINE: usize = 512;
 ///
 /// SAFETY: sample_buf must be >= FSST_SAMPLEMAX bytes long. Providing something less may cause unexpected failures.
 #[allow(clippy::ptr_arg)]
-fn make_sample<'a, 'b: 'a>(sample_buf: &'a mut Vec<u8>, str_in: &Vec<&'b [u8]>) -> Vec<&'a [u8]> {
+fn make_sample<'a, 'b: 'a>(
+    sample_buf: &'a mut Vec<u8>,
+    str_in: &Vec<&'b [u8]>,
+    tot_size: usize,
+) -> Vec<&'a [u8]> {
     assert!(
         sample_buf.capacity() >= FSST_SAMPLEMAX,
         "sample_buf.len() < FSST_SAMPLEMAX"
@@ -537,7 +541,6 @@ fn make_sample<'a, 'b: 'a>(sample_buf: &'a mut Vec<u8>, str_in: &Vec<&'b [u8]>) 
 
     let mut sample: Vec<&[u8]> = Vec::new();
 
-    let tot_size: usize = str_in.iter().map(|s| s.len()).sum();
     if tot_size < FSST_SAMPLETARGET {
         return str_in.clone();
     }
@@ -609,7 +612,9 @@ impl Compressor {
         let mut sample_memory = Vec::with_capacity(FSST_SAMPLEMAX);
         let mut pqueue = BinaryHeap::with_capacity(65_536);
 
-        let sample = make_sample(&mut sample_memory, values);
+        let tot_size: usize = values.iter().map(|s| s.len()).sum();
+        let sampled = tot_size >= FSST_SAMPLETARGET;
+        let sample = make_sample(&mut sample_memory, values, tot_size);
         for sample_frac in GENERATIONS {
             for (i, line) in sample.iter().enumerate() {
                 if sample_frac < 128 && ((fsst_hash(i as u64) & 127) as usize) > sample_frac {
@@ -621,7 +626,8 @@ impl Compressor {
 
             // Clear the heap before we use it again
             pqueue.clear();
-            builder.optimize(&counters, sample_frac, &mut pqueue);
+            let prune = sample_frac >= 128 && !sampled;
+            builder.optimize(&counters, sample_frac, &mut pqueue, prune);
             counters.clear();
         }
 
@@ -757,6 +763,7 @@ impl CompressorBuilder {
         counters: &Counter,
         sample_frac: usize,
         pqueue: &mut BinaryHeap<Candidate>,
+        prune: bool,
     ) {
         // Use a HashMap to deduplicate candidates by symbol content, combining gains
         // when the same symbol is encountered via different codes.
@@ -771,7 +778,10 @@ impl CompressorBuilder {
 
             // From the c++ impl:
             // "improves both compression speed (less candidates), but also quality!!"
-            if count < (5 * sample_frac / 128) {
+            // When pruning (final pass, exact counts), lower the threshold to 1
+            // so the pruning check can decide based on cost/benefit.
+            let min_count = if prune { 1 } else { 5 * sample_frac / 128 };
+            if count < min_count {
                 continue;
             }
 
@@ -817,6 +827,17 @@ impl CompressorBuilder {
         let mut n_symbols = 0;
         while !pqueue.is_empty() && n_symbols < 255 {
             let candidate = pqueue.pop().unwrap();
+            if prune {
+                let symbol_len = candidate.symbol.len();
+                let saves = if symbol_len == 1 {
+                    candidate.gain / 8 // undo the 8x single-byte boost
+                } else {
+                    candidate.gain
+                };
+                if saves <= symbol_len + 1 {
+                    continue;
+                }
+            }
             if self.insert(candidate.symbol, candidate.symbol.len()) {
                 n_symbols += 1;
             }
