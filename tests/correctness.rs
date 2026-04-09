@@ -137,11 +137,25 @@ fn test_pruning_small_input() {
 
     // 0xFF (count=3) survives: pruning lowers the count threshold to 1,
     // and saves (3) > cost (2). Bytes 200..210 (count=1) are pruned.
+    //
+    // Under miri, only 3 generations run (vs 5 normally), so the longest
+    // merged symbol reaches 4 bytes instead of 8.
+    #[cfg(not(miri))]
     assert_eq!(
         compressor.symbol_table(),
         &[
             Symbol::from_slice(b"aa\0\0\0\0\0\0"),
             Symbol::from_slice(b"aaaaaaaa"),
+            Symbol::from_u8(b'a'),
+            Symbol::from_u8(0xFF),
+        ],
+    );
+    #[cfg(miri)]
+    assert_eq!(
+        compressor.symbol_table(),
+        &[
+            Symbol::from_slice(b"aa\0\0\0\0\0\0"),
+            Symbol::from_slice(b"aaaa\0\0\0\0"),
             Symbol::from_u8(b'a'),
             Symbol::from_u8(0xFF),
         ],

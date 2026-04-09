@@ -70,11 +70,11 @@ fn run_bench(name: &str, buf: &[u8], c: &mut Criterion) {
     let mut buffer = Vec::with_capacity(buf.len() * 2);
     group.throughput(Throughput::Bytes(buf.len() as u64));
     group.bench_function("compress-only", |b| {
-        b.iter(|| unsafe { compressor.compress_into(&buf, &mut buffer) });
+        b.iter(|| unsafe { compressor.compress_into(buf, &mut buffer) });
     });
 
     unsafe {
-        compressor.compress_into(&buf, &mut buffer);
+        compressor.compress_into(buf, &mut buffer);
     };
     let decompressor = compressor.decompressor();
     group.bench_function("decompress", |b| {
@@ -129,11 +129,10 @@ fn bench_dbtext(c: &mut Criterion) {
 }
 
 /// For small corpus, there can be a pruning benefit.
-#[expect(clippy::use_debug)]
 fn bench_small_input(c: &mut Criterion) {
     let mut buf = vec![b'a'; 500];
     for b in 200u8..210 {
-        buf.extend(std::iter::repeat(b).take(5));
+        buf.extend(std::iter::repeat_n(b, 5));
     }
 
     run_bench("small-input", &buf, c);
