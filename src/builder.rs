@@ -256,10 +256,7 @@ impl CompressorBuilder {
         // NOTE: `vec!` has a specialization for building a new vector of `0u64`. Because Symbol and u64
         //  have the same bit pattern, we can allocate as u64 and transmute. If we do `vec![Symbol::EMPTY; N]`,
         // that will create a new Vec and call `Symbol::EMPTY.clone()` `N` times which is considerably slower.
-        let symbols = vec![0u64; 511];
-
-        // SAFETY: transmute safety assured by the compiler.
-        let symbols: Vec<Symbol> = unsafe { std::mem::transmute(symbols) };
+        let symbols = vec![Symbol::ZERO; 511];
 
         let mut table = Self {
             symbols,
@@ -519,37 +516,25 @@ const GENERATIONS: [usize; 5] = [8usize, 38, 68, 98, 128];
 const GENERATIONS: [usize; 3] = [8usize, 38, 128];
 
 const FSST_SAMPLETARGET: usize = 1 << 14;
-const FSST_SAMPLEMAX: usize = 1 << 15;
 const FSST_SAMPLELINE: usize = 512;
 
 /// Create a sample from a set of strings in the input.
 ///
-/// Sample is constructing by copying "chunks" from the `str_in`s into the `sample_buf`, the
-/// returned slices are pointers into the `sample_buf`.
-///
-/// SAFETY: sample_buf must be >= FSST_SAMPLEMAX bytes long. Providing something less may cause unexpected failures.
-#[allow(clippy::ptr_arg)]
-fn make_sample<'a, 'b: 'a>(
-    sample_buf: &'a mut Vec<u8>,
-    str_in: &Vec<&'b [u8]>,
-    tot_size: usize,
-) -> Vec<&'a [u8]> {
-    assert!(
-        sample_buf.capacity() >= FSST_SAMPLEMAX,
-        "sample_buf.len() < FSST_SAMPLEMAX"
-    );
-
+/// The sample is picked based on criteria from the C++ implementation, and it
+/// is a vector of subranges of the input strings `str_in`.
+fn make_sample<'a>(str_in: &[&'a [u8]], tot_size: usize) -> Vec<&'a [u8]> {
     let mut sample: Vec<&[u8]> = Vec::new();
 
     if tot_size < FSST_SAMPLETARGET {
-        return str_in.clone();
+        return str_in.to_vec();
     }
 
     let mut sample_rnd = fsst_hash(4637947);
     let sample_lim = FSST_SAMPLETARGET;
-    let mut sample_buf_offset: usize = 0;
 
-    while sample_buf_offset < sample_lim {
+    let mut sample_size = 0;
+
+    while sample_size < sample_lim {
         sample_rnd = fsst_hash(sample_rnd);
         let line_nr = (sample_rnd as usize) % str_in.len();
 
@@ -569,15 +554,8 @@ fn make_sample<'a, 'b: 'a>(
 
         let len = FSST_SAMPLELINE.min(line.len() - chunk);
 
-        sample_buf.extend_from_slice(&line[chunk..chunk + len]);
-
-        // SAFETY: this is the data we just placed into `sample_buf` in the line above.
-        let slice =
-            unsafe { std::slice::from_raw_parts(sample_buf.as_ptr().add(sample_buf_offset), len) };
-
-        sample.push(slice);
-
-        sample_buf_offset += len;
+        sample.push(&line[chunk..chunk + len]);
+        sample_size += len;
     }
 
     sample
@@ -609,12 +587,11 @@ impl Compressor {
         }
 
         let mut counters = Counter::new();
-        let mut sample_memory = Vec::with_capacity(FSST_SAMPLEMAX);
         let mut pqueue = BinaryHeap::with_capacity(65_536);
 
         let tot_size: usize = values.iter().map(|s| s.len()).sum();
         let sampled = tot_size >= FSST_SAMPLETARGET;
-        let sample = make_sample(&mut sample_memory, values, tot_size);
+        let sample = make_sample(values, tot_size);
         for sample_frac in GENERATIONS {
             for (i, line) in sample.iter().enumerate() {
                 if sample_frac < 128 && ((fsst_hash(i as u64) & 127) as usize) > sample_frac {
