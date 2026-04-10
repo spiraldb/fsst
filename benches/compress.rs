@@ -56,52 +56,54 @@ fn download_dataset(url: &str, path: impl AsRef<Path>) -> Result<(), Box<dyn Err
     Ok(())
 }
 
+fn run_bench(name: &str, buf: &[u8], c: &mut Criterion) {
+    let mut group = c.benchmark_group(name);
+
+    group.bench_function("train-and-compress", |b| {
+        b.iter_with_large_drop(|| {
+            let compressor = Compressor::train(&vec![&buf]);
+            compressor.compress_bulk(std::hint::black_box(&vec![&buf]))
+        });
+    });
+
+    let compressor = Compressor::train(&vec![&buf]);
+    let mut buffer = Vec::with_capacity(buf.len() * 2);
+    group.throughput(Throughput::Bytes(buf.len() as u64));
+    group.bench_function("compress-only", |b| {
+        b.iter(|| unsafe { compressor.compress_into(buf, &mut buffer) });
+    });
+
+    unsafe {
+        compressor.compress_into(buf, &mut buffer);
+    };
+    let decompressor = compressor.decompressor();
+    group.bench_function("decompress", |b| {
+        b.iter_with_large_drop(|| decompressor.decompress(&buffer));
+    });
+
+    group.finish();
+
+    // Report the compression factor for this dataset.
+    let uncompressed_size = buf.len();
+    let compressor = Compressor::train(&vec![&buf]);
+
+    let compressed = compressor.compress_bulk(&vec![&buf]);
+    let compressed_size = compressed.iter().map(|l| l.len()).sum::<usize>();
+    let cf = (uncompressed_size as f64) / (compressed_size as f64);
+    println!(
+        "compressed {name} {uncompressed_size} => {compressed_size}B (compression factor {cf:.2}:1)"
+    )
+}
+
 #[allow(clippy::use_debug)]
 fn bench_dbtext(c: &mut Criterion) {
     fn run_dataset_bench(name: &str, url: &str, path: &str, c: &mut Criterion) {
-        let mut group = c.benchmark_group(name);
         download_dataset(url, path).unwrap();
 
         let mut buf = Vec::new();
-        {
-            let mut file = File::open(path).unwrap();
-            file.read_to_end(&mut buf).unwrap();
-        }
+        File::open(path).unwrap().read_to_end(&mut buf).unwrap();
 
-        group.bench_function("train-and-compress", |b| {
-            b.iter_with_large_drop(|| {
-                let compressor = Compressor::train(&vec![&buf]);
-                compressor.compress_bulk(std::hint::black_box(&vec![&buf]))
-            });
-        });
-
-        let compressor = Compressor::train(&vec![&buf]);
-        let mut buffer = Vec::with_capacity(200 * 1024 * 1024);
-        group.throughput(Throughput::Bytes(buf.len() as u64));
-        group.bench_function("compress-only", |b| {
-            b.iter(|| unsafe { compressor.compress_into(&buf, &mut buffer) });
-        });
-
-        unsafe {
-            compressor.compress_into(&buf, &mut buffer);
-        };
-        let decompressor = compressor.decompressor();
-        group.bench_function("decompress", |b| {
-            b.iter_with_large_drop(|| decompressor.decompress(&buffer));
-        });
-
-        group.finish();
-
-        // Report the compression factor for this dataset.
-        let uncompressed_size = buf.len();
-        let compressor = Compressor::train(&vec![&buf]);
-
-        let compressed = compressor.compress_bulk(&vec![&buf]);
-        let compressed_size = compressed.iter().map(|l| l.len()).sum::<usize>();
-        let cf = (uncompressed_size as f64) / (compressed_size as f64);
-        println!(
-            "compressed {name} {uncompressed_size} => {compressed_size}B (compression factor {cf:.2}:1)"
-        )
+        run_bench(name, &buf, c);
     }
 
     run_dataset_bench(
@@ -126,5 +128,15 @@ fn bench_dbtext(c: &mut Criterion) {
     );
 }
 
-criterion_group!(compress_bench, bench_dbtext);
+/// For small corpus, there can be a pruning benefit.
+fn bench_small_input(c: &mut Criterion) {
+    let mut buf = vec![b'a'; 500];
+    for b in 200u8..210 {
+        buf.extend(std::iter::repeat_n(b, 5));
+    }
+
+    run_bench("small-input", &buf, c);
+}
+
+criterion_group!(compress_bench, bench_dbtext, bench_small_input);
 criterion_main!(compress_bench);
