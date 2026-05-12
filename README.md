@@ -25,7 +25,7 @@ but it is mostly written from a careful reading of the paper.
 
 ## FSST12 variant
 
-The [`fsst::fsst12`][fsst12-mod] module implements the 12-bit-code FSST variant from the
+The `fsst::fsst12` module implements the 12-bit-code FSST variant from the
 [cwida/fsst][MIT-licensed implementation] reference (also mentioned in the
 [FastLanes File Format paper][fastlanes]). Codes are 12 bits wide (4096 entries), the first 256
 codes are reserved as single-byte identity codes, and there is no escape mechanism. Single-byte
@@ -44,4 +44,3 @@ assert_eq!(decompressed, b"the quick brown fox");
 [whitepaper]: https://www.vldb.org/pvldb/vol13/p2649-boncz.pdf
 [MIT-licensed implementation]: https://github.com/cwida/fsst
 [fastlanes]: https://www.vldb.org/pvldb/vol18/p4629-afroozeh.pdf
-[fsst12-mod]: https://docs.rs/fsst-rs/latest/fsst/fsst12/index.html
