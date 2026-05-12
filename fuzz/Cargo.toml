@@ -26,3 +26,31 @@ path = "fuzz_targets/fuzz_compress.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "fuzz_fsst12_train"
+path = "fuzz_targets/fuzz_fsst12_train.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_fsst12_compress"
+path = "fuzz_targets/fuzz_fsst12_compress.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_train_then_compress"
+path = "fuzz_targets/fuzz_train_then_compress.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_fsst12_train_then_compress"
+path = "fuzz_targets/fuzz_fsst12_train_then_compress.rs"
+test = false
+doc = false
+bench = false
