@@ -194,17 +194,12 @@ impl Compressor12 {
     fn compress_word_full(&self, word: u64) -> (u16, usize) {
         // SAFETY: codes_two_byte has FSST12_TWO_BYTE_TABLE_SIZE = 65536 entries, and
         // `word as u16 as usize` is always in [0, 65535].
-        let two_byte = unsafe {
-            *self
-                .codes_two_byte
-                .get_unchecked((word as u16) as usize)
-        };
+        let two_byte = unsafe { *self.codes_two_byte.get_unchecked((word as u16) as usize) };
         let two_byte_code = two_byte & CODE12_MASK;
         let two_byte_len = (two_byte >> CODE12_LEN_SHIFT) as usize;
 
         let entry = self.lossy_pht.lookup(word);
-        if !entry.is_unused() && compare_masked(word, entry.symbol.to_u64(), entry.ignored_bits)
-        {
+        if !entry.is_unused() && compare_masked(word, entry.symbol.to_u64(), entry.ignored_bits) {
             let entry_len = ((64 - entry.ignored_bits) >> 3) as usize;
             return (entry.code, entry_len);
         }
@@ -216,11 +211,7 @@ impl Compressor12 {
     fn compress_word(&self, word: u64, remaining: usize) -> (u16, usize) {
         if remaining >= 2 {
             // SAFETY: `word as u16 as usize` is always in [0, 65535].
-            let two_byte = unsafe {
-                *self
-                    .codes_two_byte
-                    .get_unchecked((word as u16) as usize)
-            };
+            let two_byte = unsafe { *self.codes_two_byte.get_unchecked((word as u16) as usize) };
             let two_byte_code = two_byte & CODE12_MASK;
             let two_byte_len = (two_byte >> CODE12_LEN_SHIFT) as usize;
 
@@ -350,11 +341,7 @@ impl<'a> Decompressor12<'a> {
     /// unsafe { out.set_len(len) };
     /// assert_eq!(&out, b"abcdefgh");
     /// ```
-    pub fn decompress_into(
-        &self,
-        compressed: &[u8],
-        decoded: &mut [MaybeUninit<u8>],
-    ) -> usize {
+    pub fn decompress_into(&self, compressed: &[u8], decoded: &mut [MaybeUninit<u8>]) -> usize {
         if compressed.is_empty() {
             return 0;
         }
@@ -652,8 +639,7 @@ mod tests {
 
         let decompressor = compressor.decompressor();
         let mut decompressed: Vec<u8> = Vec::with_capacity(plaintext.len());
-        let len =
-            decompressor.decompress_into(&compressed, decompressed.spare_capacity_mut());
+        let len = decompressor.decompress_into(&compressed, decompressed.spare_capacity_mut());
         // SAFETY: decompress_into initialized the first `len` bytes.
         unsafe { decompressed.set_len(len) };
         assert_eq!(decompressed, plaintext);

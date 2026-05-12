@@ -261,9 +261,7 @@ fn bench_fsst12_micro(c: &mut Criterion) {
     let identity_compressor = CompressorBuilder12::new().build();
     group.bench_function("compress", |b| {
         // SAFETY: output_buf capacity holds the worst-case FSST12 output.
-        b.iter(|| unsafe {
-            identity_compressor.compress_into(&test_string, &mut output_buf)
-        });
+        b.iter(|| unsafe { identity_compressor.compress_into(&test_string, &mut output_buf) });
     });
     // SAFETY: same.
     unsafe { identity_compressor.compress_into(&test_string, &mut output_buf) };

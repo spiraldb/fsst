@@ -649,7 +649,11 @@ mod tests {
         assert!(!builder.insert(Symbol::from_slice(b"abce\0\0\0\0"), 4));
         let compressor = builder.build();
         let compressed = compressor.compress(b"abcd");
-        assert_eq!(compressed.len(), 2, "first inserted symbol should still match");
+        assert_eq!(
+            compressed.len(),
+            2,
+            "first inserted symbol should still match"
+        );
     }
 
     #[test]
