@@ -6,7 +6,7 @@
 
 use crate::{
     Symbol,
-    builder::{FSST_SAMPLETARGET, GENERATIONS, fsst_hash, make_sample},
+    builder::{FSST_SAMPLETARGET, fsst_hash, make_sample},
     compare_masked,
 };
 use rustc_hash::{FxBuildHasher, FxHashMap};
@@ -17,6 +17,18 @@ use super::{
     CODE12_LEN_SHIFT, CODE12_MASK, Compressor12, FSST12_MAX_LEARNED, FSST12_MAX_SYMBOLS,
     FSST12_RESERVED_CODES, FSST12_TWO_BYTE_TABLE_SIZE, lossy_pht::LossyPht12, pack_code12,
 };
+
+/// Sample fractions used per training generation.
+///
+/// Deliberately differs from cwida/fsst's FSST12-specific schedule (`[14, 52, 90, 128]`
+/// in `libfsst12.cpp`, four rounds), which is tuned for chaotic input like URLs / JSON.
+/// We reuse the five-round FSST8 schedule here because it compresses text materially
+/// better in our sweep (declaration / wikipedia / l_comment all degrade ~5-10% on the
+/// cwida schedule); the cwida schedule only wins on the `urls` corpus.
+#[cfg(not(miri))]
+const GENERATIONS12: [usize; 5] = [8usize, 38, 68, 98, 128];
+#[cfg(miri)]
+const GENERATIONS12: [usize; 3] = [8usize, 38, 128];
 
 /// Sentinel for `prev_code` before the first emission. Stored as the highest row of
 /// [`Counter12::pair_index`]; never appears in `code1_index`.
@@ -454,7 +466,7 @@ impl Compressor12 {
         let tot_size: usize = values.iter().map(|s| s.len()).sum();
         let sampled = tot_size >= FSST_SAMPLETARGET;
         let sample = make_sample(values, tot_size);
-        for sample_frac in GENERATIONS {
+        for sample_frac in GENERATIONS12 {
             for (i, line) in sample.iter().enumerate() {
                 if sample_frac < 128 && ((fsst_hash(i as u64) & 127) as usize) > sample_frac {
                     continue;

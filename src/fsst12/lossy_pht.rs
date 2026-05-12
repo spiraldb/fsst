@@ -6,10 +6,15 @@
 use crate::Symbol;
 use crate::builder::fsst_hash;
 
-/// 2048 × 16-byte entries = 32 KB. Matches the classic FSST PHT size. The full working
-/// set during compression (this table plus the 128 KB two-byte index plus up to 36 KB of
-/// symbol and length tables) does not fit in 32 KB L1d on common hardware; this size is
-/// inherited from the classic codec for parity rather than chosen by analysis here.
+/// 2048 × 16-byte entries = 32 KB. Matches the classic FSST PHT size.
+///
+/// Deliberately smaller than cwida/fsst's FSST12 PHT (`1 << 14` in `libfsst12.hpp`,
+/// 16384 entries / 256 KB). Our sweep showed cwida's size mostly hurts compression on
+/// text-like corpora (declaration / wikipedia / l_comment all degrade by 0.025–0.05),
+/// helps slightly on `urls` / `art_of_war`, and grows the working set out of L1d on
+/// common hardware. The full working set at this size (this table plus the 128 KB
+/// two-byte index plus up to 36 KB of symbol/length tables) still does not fit in 32 KB
+/// L1d, but doubling further makes the cache pressure worse without a clear win.
 pub(crate) const FSST12_PHT_SIZE: usize = 1 << 11;
 
 /// Code 0 is the identity code for byte `0x00`, which is length 1 and therefore never

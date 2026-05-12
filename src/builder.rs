@@ -511,9 +511,9 @@ impl CompressorBuilder {
 ///
 /// [FSST paper]: https://www.vldb.org/pvldb/vol13/p2649-boncz.pdf
 #[cfg(not(miri))]
-pub(crate) const GENERATIONS: [usize; 5] = [8usize, 38, 68, 98, 128];
+const GENERATIONS: [usize; 5] = [8usize, 38, 68, 98, 128];
 #[cfg(miri)]
-pub(crate) const GENERATIONS: [usize; 3] = [8usize, 38, 128];
+const GENERATIONS: [usize; 3] = [8usize, 38, 128];
 
 pub(crate) const FSST_SAMPLETARGET: usize = 1 << 14;
 const FSST_SAMPLELINE: usize = 512;
