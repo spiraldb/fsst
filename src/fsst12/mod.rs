@@ -1,7 +1,8 @@
 //! FSST12: 12-bit-code variant of FSST.
 //!
-//! FSST12 is described in the [FastLanes File Format paper][fastlanes] and implemented in
-//! reference form by [cwida/fsst][cwida]. It differs from classic 8-bit FSST in three ways:
+//! Ported from the [cwida/fsst][cwida] reference implementation by the original FSST
+//! authors; also mentioned in the [FastLanes File Format paper][fastlanes]. It differs
+//! from classic 8-bit FSST in three ways:
 //!
 //! - Codes are 12 bits wide, so the symbol table can hold up to 4096 entries.
 //! - The first 256 codes are reserved: code `i` always decodes to the single byte `i`.
@@ -13,8 +14,8 @@
 //! per code. Single-byte fallbacks still cost more than the byte they encode (1.5× vs.
 //! 1×), but the penalty is lighter than FSST8's 2× escape cost.
 //!
-//! [fastlanes]: https://www.vldb.org/pvldb/vol18/p4629-afroozeh.pdf
 //! [cwida]: https://github.com/cwida/fsst
+//! [fastlanes]: https://www.vldb.org/pvldb/vol18/p4629-afroozeh.pdf
 
 use crate::{Symbol, advance_8byte_word, compare_masked};
 use std::mem::MaybeUninit;

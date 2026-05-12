@@ -25,8 +25,9 @@ but it is mostly written from a careful reading of the paper.
 
 ## FSST12 variant
 
-The [`fsst::fsst12`][fsst12-mod] module implements the 12-bit-code FSST variant described in the
-[FastLanes File Format paper][fastlanes]. Codes are 12 bits wide (4096 entries), the first 256
+The [`fsst::fsst12`][fsst12-mod] module implements the 12-bit-code FSST variant from the
+[cwida/fsst][MIT-licensed implementation] reference (also mentioned in the
+[FastLanes File Format paper][fastlanes]). Codes are 12 bits wide (4096 entries), the first 256
 codes are reserved as single-byte identity codes, and there is no escape mechanism. Single-byte
 fallbacks still cost 1.5× their plaintext bytes, but the penalty is lighter than classic FSST's
 2× escape cost.
