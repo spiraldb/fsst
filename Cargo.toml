@@ -5,8 +5,12 @@ description = "Pure-Rust implementation of Fast Static Symbol Tables algorithm f
 authors = ["SpiralDB Developers <hello@spiraldb.com>"]
 license = "Apache-2.0"
 repository = "https://github.com/spiraldb/fsst"
+readme = "README.md"
+keywords = ["fsst", "compression", "string", "symbol-table", "encoding"]
+categories = ["compression"]
 rust-version = "1.86.0"
 edition = "2024"
+exclude = ["benchmarks/*", ".github/*", "logo.webp"]
 
 [lib]
 name = "fsst"
