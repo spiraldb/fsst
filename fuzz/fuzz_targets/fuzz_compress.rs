@@ -1,5 +1,8 @@
 #![no_main]
 
+// Trains and compresses on the same buffer, so every byte of the input is in the training
+// corpus. PHT-miss and unseen-byte paths are exercised by `fuzz_train_then_compress`.
+
 use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: &[u8]| {

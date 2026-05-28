@@ -13,6 +13,7 @@ use std::fmt::{Debug, Formatter};
 use std::mem::MaybeUninit;
 
 mod builder;
+pub mod fsst12;
 mod lossy_pht;
 
 pub use builder::*;

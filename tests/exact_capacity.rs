@@ -2,6 +2,7 @@
 
 #![cfg(test)]
 
+use fsst::fsst12::CompressorBuilder12;
 use fsst::{CompressorBuilder, Symbol};
 
 #[test]
@@ -32,6 +33,29 @@ fn test_decompress_exact_capacity() {
     let spare = decompressed.spare_capacity_mut();
 
     // This previously panicked with `exhaust input before output`. It should now succeed.
+    let len = decompressor.decompress_into(&compressed, spare);
+    unsafe { decompressed.set_len(len) };
+
+    assert_eq!(decompressed, plaintext);
+}
+
+#[test]
+fn fsst12_test_decompress_exact_capacity() {
+    // SWAR writes 8 bytes per code; with exactly `plaintext.len()` capacity, the safe
+    // byte-by-byte tail must take over to avoid over-writing past the buffer end.
+    let compressor = {
+        let mut builder = CompressorBuilder12::new();
+        builder.insert(Symbol::from_slice(b"aaaaaaaa"), 8);
+        builder.build()
+    };
+
+    let plaintext = vec![b'a'; 100_000];
+    let compressed = compressor.compress(&plaintext);
+
+    let decompressor = compressor.decompressor();
+
+    let mut decompressed = Vec::with_capacity(plaintext.len());
+    let spare = decompressed.spare_capacity_mut();
     let len = decompressor.decompress_into(&compressed, spare);
     unsafe { decompressed.set_len(len) };
 

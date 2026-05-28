@@ -14,6 +14,7 @@ use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 
 use curl::easy::Easy;
 use fsst::Compressor;
+use fsst::fsst12::Compressor12;
 
 fn download_dataset(url: &str, path: impl AsRef<Path>) -> Result<(), Box<dyn Error>> {
     let target = path.as_ref();
@@ -95,6 +96,42 @@ fn run_bench(name: &str, buf: &[u8], c: &mut Criterion) {
     )
 }
 
+fn run_bench_fsst12(name: &str, buf: &[u8], c: &mut Criterion) {
+    let mut group = c.benchmark_group(format!("fsst12/{name}"));
+
+    group.bench_function("train-and-compress", |b| {
+        b.iter_with_large_drop(|| {
+            let compressor = Compressor12::train(&[buf]);
+            compressor.compress(std::hint::black_box(buf))
+        });
+    });
+
+    let compressor = Compressor12::train(&[buf]);
+    let mut buffer = Vec::with_capacity(buf.len() * 3 / 2 + 2);
+    group.throughput(Throughput::Bytes(buf.len() as u64));
+    group.bench_function("compress-only", |b| {
+        // SAFETY: `buffer` capacity holds the worst-case FSST12 output.
+        b.iter(|| unsafe { compressor.compress_into(buf, &mut buffer) });
+    });
+
+    // SAFETY: same as above.
+    unsafe { compressor.compress_into(buf, &mut buffer) };
+    let decompressor = compressor.decompressor();
+    group.bench_function("decompress", |b| {
+        b.iter_with_large_drop(|| decompressor.decompress(&buffer));
+    });
+
+    group.finish();
+
+    let uncompressed_size = buf.len();
+    let compressed = Compressor12::train(&[buf]).compress(buf);
+    let cf = (uncompressed_size as f64) / (compressed.len() as f64);
+    println!(
+        "fsst12 compressed {name} {uncompressed_size} => {}B (compression factor {cf:.2}:1)",
+        compressed.len()
+    );
+}
+
 #[allow(clippy::use_debug)]
 fn bench_dbtext(c: &mut Criterion) {
     fn run_dataset_bench(name: &str, url: &str, path: &str, c: &mut Criterion) {
@@ -104,6 +141,7 @@ fn bench_dbtext(c: &mut Criterion) {
         File::open(path).unwrap().read_to_end(&mut buf).unwrap();
 
         run_bench(name, &buf, c);
+        run_bench_fsst12(name, &buf, c);
     }
 
     run_dataset_bench(
@@ -136,6 +174,7 @@ fn bench_small_input(c: &mut Criterion) {
     }
 
     run_bench("small-input", &buf, c);
+    run_bench_fsst12("small-input", &buf, c);
 }
 
 criterion_group!(compress_bench, bench_dbtext, bench_small_input);

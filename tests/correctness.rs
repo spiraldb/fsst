@@ -2,6 +2,7 @@
 
 #![cfg(test)]
 
+use fsst::fsst12::{Compressor12, CompressorBuilder12};
 use fsst::{Compressor, CompressorBuilder, Symbol};
 
 static PREAMBLE: &str = r#"
@@ -163,4 +164,79 @@ fn test_pruning_small_input() {
 
     let compressed = compressor.compress(&corpus);
     assert_eq!(compressor.decompressor().decompress(&compressed), corpus);
+}
+
+// --- FSST12 ---
+
+#[test]
+fn fsst12_round_trip_preamble() {
+    let trained = Compressor12::train(&[PREAMBLE.as_bytes()]);
+    let compressed = trained.compress(PREAMBLE.as_bytes());
+    let decompressed = trained.decompressor().decompress(&compressed);
+    assert_eq!(decompressed, PREAMBLE.as_bytes());
+}
+
+#[test]
+fn fsst12_round_trip_declaration() {
+    let trained = Compressor12::train(&[DECLARATION.as_bytes()]);
+    let compressed = trained.compress(DECLARATION.as_bytes());
+    let decompressed = trained.decompressor().decompress(&compressed);
+    assert_eq!(decompressed, DECLARATION.as_bytes());
+    assert!(
+        compressed.len() < DECLARATION.len(),
+        "expected compressed ({}) < raw ({})",
+        compressed.len(),
+        DECLARATION.len(),
+    );
+}
+
+#[test]
+fn fsst12_train_on_empty_still_round_trips() {
+    let trained = Compressor12::train(&[]);
+    let input = b"the quick brown fox jumped over the lazy dog";
+    let compressed = trained.compress(input);
+    assert_eq!(trained.decompressor().decompress(&compressed), input);
+}
+
+#[test]
+fn fsst12_zero_byte_round_trip() {
+    let training_data: Vec<u8> = vec![0, 1, 2, 3, 4, 0];
+    let trained = Compressor12::train(&[training_data.as_slice()]);
+    let compressed = trained.compress(&[4, 0]);
+    assert_eq!(trained.decompressor().decompress(&compressed), &[4, 0]);
+}
+
+#[test]
+fn fsst12_chinese() {
+    let trained = Compressor12::train(&[ART_OF_WAR.as_bytes()]);
+    let compressed = trained.compress(ART_OF_WAR.as_bytes());
+    assert_eq!(
+        trained.decompressor().decompress(&compressed),
+        ART_OF_WAR.as_bytes()
+    );
+}
+
+#[cfg_attr(miri, ignore)]
+#[test]
+fn fsst12_large() {
+    let corpus: Vec<u8> = DECLARATION.bytes().cycle().take(10_240).collect();
+    let trained = Compressor12::train(&[corpus.as_slice()]);
+    let massive: Vec<u8> = DECLARATION
+        .bytes()
+        .cycle()
+        .take(16 * 1_024 * 1_024)
+        .collect();
+
+    let compressed = trained.compress(&massive);
+    assert_eq!(trained.decompressor().decompress(&compressed), massive);
+}
+
+#[test]
+fn fsst12_empty_table_round_trip() {
+    let compressor = CompressorBuilder12::new().build();
+    let input: Vec<u8> = (0..=255u8).cycle().take(4096).collect();
+    let compressed = compressor.compress(&input);
+    // Every byte → 1 code → 12 bits; 4096 codes pack into 6144 bytes.
+    assert_eq!(compressed.len(), input.len() * 3 / 2);
+    assert_eq!(compressor.decompressor().decompress(&compressed), input);
 }

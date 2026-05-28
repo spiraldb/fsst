@@ -42,6 +42,11 @@ name = "round_trip"
 bench = false
 test = false
 
+[[example]]
+name = "fsst12_round_trip"
+bench = false
+test = false
+
 [[bench]]
 name = "compress"
 harness = false

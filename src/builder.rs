@@ -515,14 +515,14 @@ const GENERATIONS: [usize; 5] = [8usize, 38, 68, 98, 128];
 #[cfg(miri)]
 const GENERATIONS: [usize; 3] = [8usize, 38, 128];
 
-const FSST_SAMPLETARGET: usize = 1 << 14;
+pub(crate) const FSST_SAMPLETARGET: usize = 1 << 14;
 const FSST_SAMPLELINE: usize = 512;
 
 /// Create a sample from a set of strings in the input.
 ///
 /// The sample is picked based on criteria from the C++ implementation, and it
 /// is a vector of subranges of the input strings `str_in`.
-fn make_sample<'a>(str_in: &[&'a [u8]], tot_size: usize) -> Vec<&'a [u8]> {
+pub(crate) fn make_sample<'a>(str_in: &[&'a [u8]], tot_size: usize) -> Vec<&'a [u8]> {
     let mut sample: Vec<&[u8]> = Vec::new();
 
     if tot_size < FSST_SAMPLETARGET {

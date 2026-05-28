@@ -2,6 +2,7 @@
 
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 
+use fsst::fsst12::{Compressor12, CompressorBuilder12};
 use fsst::{CompressorBuilder, Symbol};
 
 fn one_megabyte(seed: &[u8]) -> Vec<u8> {
@@ -225,10 +226,76 @@ fn bench_compress(c: &mut Criterion) {
     let _ = std::hint::black_box(output_buf);
 }
 
+fn bench_fsst12_micro(c: &mut Criterion) {
+    let test_string = one_megabyte(b"abcdefgh");
+    let mut output_buf: Vec<u8> = Vec::with_capacity(test_string.len() * 3 / 2 + 2);
+    let mut decoded_buf: Vec<u8> = Vec::with_capacity(test_string.len() + 8);
+
+    // Best case: one learned 8-byte symbol covers every input position.
+    let mut group = c.benchmark_group("fsst12/cf=8");
+    group.throughput(Throughput::Bytes(test_string.len() as u64));
+    let mut builder = CompressorBuilder12::new();
+    assert!(builder.insert(Symbol::from_slice(b"abcdefgh"), 8));
+    let compressor = builder.build();
+    group.bench_function("compress", |b| {
+        // SAFETY: output_buf capacity holds the worst-case FSST12 output.
+        b.iter(|| unsafe { compressor.compress_into(&test_string, &mut output_buf) });
+    });
+    // SAFETY: same capacity invariant as above.
+    unsafe { compressor.compress_into(&test_string, &mut output_buf) };
+    let decompressor = compressor.decompressor();
+    group.bench_function("decompress", |b| {
+        b.iter(|| {
+            let len = decompressor.decompress_into(&output_buf, decoded_buf.spare_capacity_mut());
+            // SAFETY: decompress_into initialized exactly `len` bytes.
+            unsafe { decoded_buf.set_len(len) };
+            let _ = std::hint::black_box(&decoded_buf);
+            decoded_buf.clear();
+        });
+    });
+    group.finish();
+
+    // Worst case: no learned symbols, every byte through an identity code.
+    let mut group = c.benchmark_group("fsst12/identity");
+    group.throughput(Throughput::Bytes(test_string.len() as u64));
+    let identity_compressor = CompressorBuilder12::new().build();
+    group.bench_function("compress", |b| {
+        // SAFETY: output_buf capacity holds the worst-case FSST12 output.
+        b.iter(|| unsafe { identity_compressor.compress_into(&test_string, &mut output_buf) });
+    });
+    // SAFETY: same.
+    unsafe { identity_compressor.compress_into(&test_string, &mut output_buf) };
+    let identity_decompressor = identity_compressor.decompressor();
+    group.bench_function("decompress", |b| {
+        b.iter(|| {
+            let len = identity_decompressor
+                .decompress_into(&output_buf, decoded_buf.spare_capacity_mut());
+            unsafe { decoded_buf.set_len(len) };
+            let _ = std::hint::black_box(&decoded_buf);
+            decoded_buf.clear();
+        });
+    });
+    group.finish();
+
+    let mut group = c.benchmark_group("fsst12/train-and-compress");
+    group.throughput(Throughput::Bytes(test_string.len() as u64));
+    group.bench_function("1mb-abcdefgh", |b| {
+        b.iter_with_large_drop(|| {
+            let compressor = Compressor12::train(&[test_string.as_slice()]);
+            compressor.compress(std::hint::black_box(&test_string))
+        });
+    });
+    group.finish();
+
+    let _ = std::hint::black_box(&output_buf);
+    let _ = std::hint::black_box(&decoded_buf);
+}
+
 criterion_group!(
     bench_micro,
     bench_compress,
     bench_decompress_short,
-    bench_decompress_escape_heavy
+    bench_decompress_escape_heavy,
+    bench_fsst12_micro
 );
 criterion_main!(bench_micro);
