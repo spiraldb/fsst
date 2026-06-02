@@ -2,10 +2,70 @@
 
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 
-use fsst::{CompressorBuilder, Symbol};
+use fsst::{Compressor, CompressorBuilder, Symbol};
 
 fn one_megabyte(seed: &[u8]) -> Vec<u8> {
     seed.iter().copied().cycle().take(1024 * 1024).collect()
+}
+
+fn symbol(bytes: &[u8]) -> Symbol {
+    let mut padded = [0; 8];
+    padded[..bytes.len()].copy_from_slice(bytes);
+    Symbol::from_slice(&padded)
+}
+
+fn bench_rebuild_from(c: &mut Criterion) {
+    let empty_symbols = Vec::new();
+    let empty_lengths = Vec::new();
+
+    let one_byte_symbols = vec![Symbol::from_u8(b'a'), Symbol::from_u8(b'b')];
+    let one_byte_lengths = vec![1, 1];
+
+    let two_byte_symbols = vec![symbol(b"ab"), symbol(b"cd"), symbol(b"ef")];
+    let two_byte_lengths = vec![2, 2, 2];
+
+    let mixed_symbols = vec![
+        symbol(b"xy"),
+        symbol(b"ab"),
+        symbol(b"ab0"),
+        symbol(b"cd01"),
+        symbol(b"ef012"),
+        symbol(b"gh0123"),
+        symbol(b"ij01234"),
+        symbol(b"kl012345"),
+        Symbol::from_u8(b'x'),
+        Symbol::from_u8(b'y'),
+    ];
+    let mixed_lengths = vec![2, 2, 3, 4, 5, 6, 7, 8, 1, 1];
+
+    let training_corpus = one_megabyte(b"the quick brown fox jumps over the lazy dog; ");
+    let training_values = vec![training_corpus.as_slice()];
+    let trained = Compressor::train(&training_values);
+    let trained_symbols = trained.symbol_table().to_vec();
+    let trained_lengths = trained.symbol_lengths().to_vec();
+
+    let mut group = c.benchmark_group("rebuild-from");
+
+    macro_rules! bench_case {
+        ($name:literal, $symbols:expr, $lengths:expr) => {
+            group.bench_function($name, |b| {
+                b.iter_with_large_drop(|| {
+                    Compressor::rebuild_from(
+                        std::hint::black_box($symbols.as_slice()),
+                        std::hint::black_box($lengths.as_slice()),
+                    )
+                })
+            });
+        };
+    }
+
+    bench_case!("empty-table", empty_symbols, empty_lengths);
+    bench_case!("one-byte-table", one_byte_symbols, one_byte_lengths);
+    bench_case!("two-byte-table", two_byte_symbols, two_byte_lengths);
+    bench_case!("mixed-length-table", mixed_symbols, mixed_lengths);
+    bench_case!("trained-table", trained_symbols, trained_lengths);
+
+    group.finish();
 }
 
 fn bench_decompress_short(c: &mut Criterion) {
@@ -228,6 +288,7 @@ fn bench_compress(c: &mut Criterion) {
 criterion_group!(
     bench_micro,
     bench_compress,
+    bench_rebuild_from,
     bench_decompress_short,
     bench_decompress_escape_heavy
 );
