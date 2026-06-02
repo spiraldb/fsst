@@ -829,7 +829,7 @@ impl Compressor {
         let lengths = symbol_lens.to_vec();
         let mut lossy_pht = LossyPHT::new();
 
-        let mut codes_one_byte = vec![Code::UNUSED; 256];
+        let mut codes_one_byte = [Code::UNUSED; 256];
 
         // Insert all of the one byte symbols first.
         for (code, (&symbol, &len)) in symbols.iter().zip(lengths.iter()).enumerate() {
@@ -838,8 +838,10 @@ impl Compressor {
             }
         }
 
-        // Initialize the codes_two_byte table to be all escapes
-        let mut codes_two_byte = vec![Code::UNUSED; 65_536];
+        let mut codes_two_byte = Vec::with_capacity(65_536);
+        for _ in 0..256 {
+            codes_two_byte.extend_from_slice(&codes_one_byte);
+        }
 
         // Insert the two byte symbols, possibly overwriting slots for one-byte symbols and escapes.
         for (code, (&symbol, &len)) in symbols.iter().zip(lengths.iter()).enumerate() {
@@ -854,14 +856,6 @@ impl Compressor {
                     );
                 }
                 _ => { /* Covered by the 1-byte loop above. */ }
-            }
-        }
-
-        // Build the finished codes_two_byte table, subbing in unused positions with the
-        // codes_one_byte value similar to what we do in CompressBuilder::finalize.
-        for (symbol, code) in codes_two_byte.iter_mut().enumerate() {
-            if *code == Code::UNUSED {
-                *code = codes_one_byte[symbol & 0xFF];
             }
         }
 
