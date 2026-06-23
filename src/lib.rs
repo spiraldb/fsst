@@ -238,8 +238,10 @@ impl<'a> Decompressor<'a> {
     ///
     /// # Panics
     ///
-    /// If the provided symbol table has length greater than or equal to [`FSST_CODE_BASE`]
+    /// If the provided symbol table has length greater than or equal to [`FSST_CODE_BASE`],
+    /// or if the symbols and lengths tables do not have the same length.
     pub fn new(symbols: &'a [Symbol], lengths: &'a [u8]) -> Self {
+        assert_eq!(symbols.len(), lengths.len(), "symbols and lengths differ");
         assert!(
             symbols.len() < FSST_CODE_BASE as usize,
             "symbol table cannot have size exceeding 255"
@@ -303,7 +305,7 @@ impl<'a> Decompressor<'a> {
                 ($code:expr) => {{
                     out_ptr
                         .cast::<u64>()
-                        .write_unaligned(self.symbols.get_unchecked($code as usize).to_u64());
+                        .write_unaligned(self.symbols[$code as usize].to_u64());
                     out_ptr = out_ptr.add(*self.lengths.get_unchecked($code as usize) as usize);
                 }};
             }
@@ -512,12 +514,12 @@ impl<'a> Decompressor<'a> {
                     in_ptr = in_ptr.add(1);
                     out_ptr = out_ptr.add(1);
                 } else {
+                    let sym = self.symbols[code as usize].to_u64();
                     let len = *self.lengths.get_unchecked(code as usize) as usize;
                     assert!(
                         out_end.offset_from(out_ptr) >= len as isize,
                         "output buffer sized too small"
                     );
-                    let sym = self.symbols.get_unchecked(code as usize).to_u64();
                     let sym_bytes = sym.to_le_bytes();
                     std::ptr::copy_nonoverlapping(sym_bytes.as_ptr(), out_ptr, len);
                     out_ptr = out_ptr.add(len);
