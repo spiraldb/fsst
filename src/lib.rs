@@ -999,7 +999,7 @@ mod test {
             builder.insert(symbol, *len as usize);
         }
         let compressor = builder.build();
-        let built_symbols: &[u64] = unsafe { mem::transmute(&compressor.symbol_table()[..]) };
+        let built_symbols: &[u64] = unsafe { mem::transmute(&compressor.symbol_table()[0..compressor.n_symbols()]) };
         assert_eq!(built_symbols, symbols);
     }
 }
