@@ -34,7 +34,7 @@ use_debug = { level = "deny" }
 rustc-hash = "2.1.1"
 
 [dev-dependencies]
-criterion = { package = "codspeed-criterion-compat", version = "4.0" }
+criterion = { package = "codspeed-criterion-compat", version = "5.0" }
 curl = "0.4"
 
 [[example]]
