@@ -382,7 +382,7 @@ impl CompressorBuilder {
     ///
     /// Also returns the lengths vector, which is of length `n_symbols` and contains the
     /// length for each of the values.
-    fn finalize(&mut self) -> (u8, Vec<u8>) {
+    fn finalize(&mut self) -> (u8, [u8; 255]) {
         // Create a cumulative sum of each of the elements of the input line numbers.
         // Do a map that includes the previously seen value as well.
         // Regroup symbols based on their lengths.
@@ -449,7 +449,7 @@ impl CompressorBuilder {
         }
 
         // Truncate the symbol table to only include the "true" symbols.
-        self.symbols.truncate(self.n_symbols as usize);
+        self.symbols.truncate(FSST_CODE_BASE as usize - 1);
 
         // Rewrite the codes_one_byte table to point at the new code values.
         // Replace pseudocodes with escapes.
@@ -481,9 +481,9 @@ impl CompressorBuilder {
         self.lossy_pht.renumber(&new_codes);
 
         // Pre-compute the lengths
-        let mut lengths = Vec::with_capacity(self.n_symbols as usize);
-        for symbol in &self.symbols {
-            lengths.push(symbol.len() as u8);
+        let mut lengths = [0u8; 255];
+        for (len, symbol) in lengths.iter_mut().zip(&self.symbols) {
+            *len = symbol.len() as u8;
         }
 
         (has_suffix_code, lengths)
@@ -497,7 +497,10 @@ impl CompressorBuilder {
         let (has_suffix_code, lengths) = self.finalize();
 
         Compressor {
-            symbols: self.symbols,
+            symbols: self
+                .symbols
+                .try_into()
+                .expect("Symbol table should be exactly 255 elements in length"),
             lengths,
             n_symbols: self.n_symbols,
             has_suffix_code,
@@ -948,8 +951,8 @@ mod test {
         let corpus: Vec<&[u8]> = std::iter::repeat_n(text.as_slice(), 100).collect();
         let compressor = Compressor::train(&corpus);
 
-        let symbols = compressor.symbol_table();
-        let lengths = compressor.symbol_lengths();
+        let symbols = &compressor.symbol_table()[0..compressor.n_symbols()];
+        let lengths = &compressor.symbol_lengths()[0..compressor.n_symbols()];
 
         // Collect all 1-byte symbols and check for duplicates.
         let one_byte: Vec<u8> = symbols

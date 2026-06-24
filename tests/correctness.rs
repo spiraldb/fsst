@@ -98,8 +98,7 @@ fn test_all_escape_roundtrip() {
 }
 
 #[test]
-#[should_panic]
-fn test_invalid_code_not_in_symbol_table_panics() {
+fn test_invalid_code_not_in_symbol_works() {
     let compressor = CompressorBuilder::new().build();
     let decompressor = compressor.decompressor();
 
@@ -164,7 +163,7 @@ fn test_pruning_small_input() {
     // merged symbol reaches 4 bytes instead of 8.
     #[cfg(not(miri))]
     assert_eq!(
-        compressor.symbol_table(),
+        &compressor.symbol_table()[0..compressor.n_symbols()],
         &[
             Symbol::from_slice(b"aa\0\0\0\0\0\0"),
             Symbol::from_slice(b"aaaaaaaa"),
@@ -174,7 +173,7 @@ fn test_pruning_small_input() {
     );
     #[cfg(miri)]
     assert_eq!(
-        compressor.symbol_table(),
+        &compressor.symbol_table()[0..compressor.n_symbols()],
         &[
             Symbol::from_slice(b"aa\0\0\0\0\0\0"),
             Symbol::from_slice(b"aaaa\0\0\0\0"),
