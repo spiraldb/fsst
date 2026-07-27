@@ -631,31 +631,20 @@ impl Compressor {
 
             // Now, downshift the `word` and the `entry` to see if they align.
             let ignored_bits = entry.ignored_bits;
-            if entry.code != Code::UNUSED
-                && compare_masked(word, entry.symbol.to_u64(), ignored_bits)
-            {
-                // Advance the input by the symbol length (variable) and the output by one code byte
-                // SAFETY: out_ptr is not null.
-                unsafe { std::ptr::write(out_ptr, entry.code.code()) };
-                (entry.code.len() as usize, 1)
-            } else {
-                // SAFETY: out_ptr is not null
-                unsafe { std::ptr::write(out_ptr, code_twobyte.code()) };
+            let mask = u64::MAX
+                .checked_shr(ignored_bits as u32)
+                .unwrap_or_default();
+            let entry_matches = (entry.code != Code::UNUSED)
+                & ((word & mask) == entry.symbol.to_u64());
+            let code = std::hint::select_unpredictable(entry_matches, entry.code, code_twobyte);
 
-                // Advance the input by the symbol length (variable) and the output by either 1
-                // byte (if was one-byte code) or two bytes (escape).
-                (
-                    code_twobyte.len() as usize,
-                    // Predicated version of:
-                    //
-                    // if entry.code >= 256 {
-                    //      2
-                    // } else {
-                    //      1
-                    // }
-                    1 + (code_twobyte.extended_code() >> 8) as usize,
-                )
-            }
+            // SAFETY: out_ptr is not null.
+            unsafe { std::ptr::write(out_ptr, code.code()) };
+
+            let fallback_advance_out = 1 + (code_twobyte.extended_code() >> 8) as usize;
+            let advance_out =
+                std::hint::select_unpredictable(entry_matches, 1, fallback_advance_out);
+            (code.len() as usize, advance_out)
         }
     }
 
