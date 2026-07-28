@@ -179,7 +179,7 @@ fn bench_compress(c: &mut Criterion) {
         compressor.insert(Symbol::from_slice(b"abcdefgh"), 8);
         let compressor = compressor.build();
 
-        let word = u64::from_le_bytes([b'a', b'b', b'c', b'd', b'e', b'f', b'g', b'h']);
+        let word = u64::from_le_bytes(*b"abcdefgh");
         b.iter(|| unsafe { compressor.compress_word(word, output_buf.as_mut_ptr()) });
     });
 
