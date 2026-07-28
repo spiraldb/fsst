@@ -36,6 +36,7 @@ rustc-hash = "2.1.1"
 [dev-dependencies]
 criterion = { package = "codspeed-criterion-compat", version = "5.0" }
 curl = "0.4"
+hegeltest = "0.28.2"
 
 [[example]]
 name = "round_trip"
