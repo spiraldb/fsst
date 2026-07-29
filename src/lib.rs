@@ -227,24 +227,15 @@ impl Debug for Code {
 #[derive(Clone)]
 pub struct Decompressor<'a> {
     /// Slice mapping codes to symbols.
-    pub(crate) symbols: &'a [Symbol],
+    pub(crate) symbols: &'a [Symbol; 255],
 
     /// Slice containing the length of each symbol in the `symbols` slice.
-    pub(crate) lengths: &'a [u8],
+    pub(crate) lengths: &'a [u8; 255],
 }
 
 impl<'a> Decompressor<'a> {
     /// Returns a new decompressor that uses the provided symbol table.
-    ///
-    /// # Panics
-    ///
-    /// If the provided symbol table has length greater than or equal to [`FSST_CODE_BASE`]
-    pub fn new(symbols: &'a [Symbol], lengths: &'a [u8]) -> Self {
-        assert!(
-            symbols.len() < FSST_CODE_BASE as usize,
-            "symbol table cannot have size exceeding 255"
-        );
-
+    pub fn new(symbols: &'a [Symbol; 255], lengths: &'a [u8; 255]) -> Self {
         Self { symbols, lengths }
     }
 
@@ -566,10 +557,10 @@ impl<'a> Decompressor<'a> {
 #[derive(Clone)]
 pub struct Compressor {
     /// Table mapping codes to symbols.
-    pub(crate) symbols: Vec<Symbol>,
+    pub(crate) symbols: [Symbol; 255],
 
     /// Length of each symbol, values range from 1-8.
-    pub(crate) lengths: Vec<u8>,
+    pub(crate) lengths: [u8; 255],
 
     /// The number of entries in the symbol table that have been populated, not counting
     /// the escape values.
@@ -793,40 +784,50 @@ impl Compressor {
     /// Returns a readonly slice of the current symbol table.
     ///
     /// The returned slice will have length of `n_symbols`.
-    pub fn symbol_table(&self) -> &[Symbol] {
-        &self.symbols[0..self.n_symbols as usize]
+    pub fn symbol_table(&self) -> &[Symbol; 255] {
+        &self.symbols
     }
 
     /// Returns a readonly slice where index `i` contains the
     /// length of the symbol represented by code `i`.
     ///
     /// Values range from 1-8.
-    pub fn symbol_lengths(&self) -> &[u8] {
-        &self.lengths[0..self.n_symbols as usize]
+    pub fn symbol_lengths(&self) -> &[u8; 255] {
+        &self.lengths
+    }
+
+    /// Number of symbols present in the compressor's symbol table.
+    ///
+    /// Since the symbol table and length are padded to 255 elements, this value indicates the number of valid entries.
+    pub fn n_symbols(&self) -> usize {
+        self.n_symbols as usize
     }
 
     /// Rebuild a compressor from an existing symbol table.
     ///
     /// This will not attempt to optimize or re-order the codes.
     pub fn rebuild_from(symbols: impl AsRef<[Symbol]>, symbol_lens: impl AsRef<[u8]>) -> Self {
-        let symbols = symbols.as_ref();
+        let symbols_slice = symbols.as_ref();
         let symbol_lens = symbol_lens.as_ref();
 
         assert_eq!(
-            symbols.len(),
+            symbols_slice.len(),
             symbol_lens.len(),
             "symbols and lengths differ"
         );
         assert!(
-            symbols.len() <= 255,
+            symbols_slice.len() <= 255,
             "symbol table len must be <= 255, was {}",
-            symbols.len()
+            symbols_slice.len()
         );
         validate_symbol_order(symbol_lens);
+        let n_symbols = symbols_slice.len();
 
         // Insert the symbols in their given order into the FSST lookup structures.
-        let symbols = symbols.to_vec();
-        let lengths = symbol_lens.to_vec();
+        let mut symbols = [Symbol::ZERO; 255];
+        symbols[0..n_symbols].copy_from_slice(symbols_slice);
+        let mut lengths = [0u8; 255];
+        lengths[0..n_symbols].copy_from_slice(symbol_lens);
         let mut lossy_pht = LossyPHT::new();
 
         let mut codes_one_byte = [Code::UNUSED; 256];
@@ -876,7 +877,7 @@ impl Compressor {
         }
 
         Compressor {
-            n_symbols: symbols.len() as u8,
+            n_symbols: n_symbols as u8,
             symbols,
             lengths,
             codes_two_byte,
@@ -968,7 +969,8 @@ mod test {
             .collect();
 
         let compressor = Compressor::rebuild_from(symbols, lens);
-        let built_symbols: &[u64] = unsafe { mem::transmute(compressor.symbol_table()) };
+        let built_symbols: &[u64] =
+            unsafe { mem::transmute(&compressor.symbol_table()[0..compressor.n_symbols()]) };
         assert_eq!(built_symbols, symbols_u64);
     }
 
@@ -997,7 +999,8 @@ mod test {
             builder.insert(symbol, *len as usize);
         }
         let compressor = builder.build();
-        let built_symbols: &[u64] = unsafe { mem::transmute(compressor.symbol_table()) };
+        let built_symbols: &[u64] =
+            unsafe { mem::transmute(&compressor.symbol_table()[0..compressor.n_symbols()]) };
         assert_eq!(built_symbols, symbols);
     }
 }
