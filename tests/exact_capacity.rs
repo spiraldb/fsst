@@ -102,6 +102,7 @@ fn test_decompress_exact_capacity() {
     assert_eq!(decompressed, plaintext);
 }
 
+#[cfg_attr(miri, ignored)]
 #[hegel::test]
 fn decompress_mixed_stream_matches_model(tc: hegel::TestCase) {
     let symbols = SYMBOL_BYTES.map(|bytes| Symbol::from_slice(&bytes));
@@ -123,6 +124,7 @@ fn decompress_mixed_stream_matches_model(tc: hegel::TestCase) {
     assert_eq!((exact, overallocated), (expected.clone(), expected));
 }
 
+#[cfg_attr(miri, ignored)]
 #[hegel::test]
 fn compress_into_empty_clears_output(tc: hegel::TestCase) {
     let compressor = CompressorBuilder::new().build();
