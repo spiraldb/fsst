@@ -13,9 +13,21 @@ const SYMBOL_BYTES: [[u8; 8]; 8] = [
     [b'k', b'l', b'm', b'n', b'o', 0, 0, 0],
     [b'p', b'q', b'r', b's', b't', b'u', 0, 0],
     [b'v', b'w', b'x', b'y', b'z', b'0', b'1', 0],
-    [b'2', b'3', b'4', b'5', b'6', b'7', b'8', b'9'],
+    *b"23456789",
 ];
 const SYMBOL_LENGTHS: [u8; 8] = [1, 2, 3, 4, 5, 6, 7, 8];
+
+fn padded_symbol_table() -> ([Symbol; 255], [u8; 255]) {
+    let mut symbols = [Symbol::ZERO; 255];
+    let mut lengths = [0; 255];
+
+    for (idx, bytes) in SYMBOL_BYTES.iter().enumerate() {
+        symbols[idx] = Symbol::from_slice(bytes);
+        lengths[idx] = SYMBOL_LENGTHS[idx];
+    }
+
+    (symbols, lengths)
+}
 
 #[derive(Clone, Copy, Debug)]
 enum Token {
@@ -105,8 +117,8 @@ fn test_decompress_exact_capacity() {
 #[cfg_attr(miri, ignored)]
 #[hegel::test]
 fn decompress_mixed_stream_matches_model(tc: hegel::TestCase) {
-    let symbols = SYMBOL_BYTES.map(|bytes| Symbol::from_slice(&bytes));
-    let decompressor = Decompressor::new(&symbols, &SYMBOL_LENGTHS);
+    let (symbols, lengths) = padded_symbol_table();
+    let decompressor = Decompressor::new(&symbols, &lengths);
 
     let tokens = draw_tokens(&tc);
     let (compressed, expected) = model_stream(&tokens);
@@ -138,8 +150,8 @@ fn compress_into_empty_clears_output(tc: hegel::TestCase) {
 
 #[hegel::test]
 fn decompress_empty_stream_is_empty(tc: hegel::TestCase) {
-    let symbols = SYMBOL_BYTES.map(|bytes| Symbol::from_slice(&bytes));
-    let decompressor = Decompressor::new(&symbols, &SYMBOL_LENGTHS);
+    let (symbols, lengths) = padded_symbol_table();
+    let decompressor = Decompressor::new(&symbols, &lengths);
     let capacity = tc.draw(generators::integers::<usize>().max_value(256));
 
     assert!(decompress_with_capacity(&decompressor, &[], capacity).is_empty());
