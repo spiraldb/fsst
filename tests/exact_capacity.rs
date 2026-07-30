@@ -166,6 +166,7 @@ fn decompress_empty_stream_is_empty(tc: hegel::TestCase) {
     assert!(decompress_with_capacity(&decompressor, &[], capacity).is_empty());
 }
 
+#[cfg_attr(miri, ignore)]
 #[hegel::test]
 fn compress_into_exact_capacity_matches_compress(tc: hegel::TestCase) {
     let compressor = compressor_with_all_symbol_lengths();
