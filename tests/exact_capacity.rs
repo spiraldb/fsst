@@ -148,6 +148,7 @@ fn compress_into_empty_clears_output(tc: hegel::TestCase) {
     assert!(output.is_empty());
 }
 
+#[cfg_attr(miri, ignore)]
 #[hegel::test]
 fn decompress_empty_stream_is_empty(tc: hegel::TestCase) {
     let (symbols, lengths) = padded_symbol_table();
