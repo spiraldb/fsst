@@ -692,6 +692,12 @@ impl Compressor {
     /// It is up to the caller to ensure the provided buffer is large enough to hold
     /// all encoded data.
     pub unsafe fn compress_into(&self, plaintext: &[u8], values: &mut Vec<u8>) {
+        // input is empty, we must set the output length's to 0.
+        if plaintext.is_empty() {
+            values.clear();
+            return;
+        }
+
         let mut in_ptr = plaintext.as_ptr();
         let mut out_ptr = values.as_mut_ptr();
 
