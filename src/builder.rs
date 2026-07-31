@@ -279,9 +279,15 @@ impl CompressorBuilder {
             table.codes_one_byte.push(Code::new_escape(byte));
         }
 
-        // Fill codes_two_byte with pseudocode of first byte
-        for idx in 0..=65_535 {
-            table.codes_two_byte.push(Code::new_escape(idx as u8));
+        // Fill codes_two_byte with pseudocode of first byte.
+        //
+        // The pseudocode only depends on the low byte of the index, so the 65,536 entries are
+        // 256 copies of the 256-entry `codes_one_byte` row we just built. Copying the row is
+        // considerably cheaper than pushing every element individually.
+        for _ in 0..256 {
+            table
+                .codes_two_byte
+                .extend_from_slice(&table.codes_one_byte);
         }
 
         table
@@ -415,6 +421,13 @@ impl CompressorBuilder {
 
         let mut symbol_lens = [0u8; FSST_CODE_BASE as usize];
 
+        // The `codes_two_byte` slots claimed by a two-byte symbol, as (slot, new code) pairs
+        // recorded in old-code (i.e. insertion) order. Replaying them in that order below
+        // reproduces the last-write-wins behaviour of `insert` in the case where the same
+        // two-byte symbol was inserted more than once.
+        let mut two_byte_slots = [(0u16, 0u8); FSST_CODE_BASE as usize];
+        let mut n_two_byte_slots = 0usize;
+
         for i in 0..(self.n_symbols as usize) {
             let symbol = self.symbols[256 + i];
             let len = symbol.len();
@@ -436,6 +449,9 @@ impl CompressorBuilder {
                     new_codes[i] = no_suffix_code;
                     no_suffix_code += 1;
                 }
+
+                two_byte_slots[n_two_byte_slots] = (symbol.first2(), new_codes[i]);
+                n_two_byte_slots += 1;
             } else {
                 // Assign new code based on the next code available for the given length symbol
                 new_codes[i] = codes_by_length[len - 1];
@@ -466,15 +482,17 @@ impl CompressorBuilder {
 
         // Rewrite the codes_two_byte table to point at the new code values.
         // Replace pseudocodes with escapes.
-        for two_bytes in 0..=65_535 {
-            let two_byte = self.codes_two_byte[two_bytes];
-            if two_byte.extended_code() >= FSST_CODE_BASE {
-                let new_code = new_codes[two_byte.code() as usize];
-                self.codes_two_byte[two_bytes] = Code::new_symbol(new_code, 2);
-            } else {
-                // The one-byte code for the given code number here...
-                self.codes_two_byte[two_bytes] = self.codes_one_byte[two_bytes & 0xFF];
-            }
+        //
+        // A slot holds a symbol code if and only if some two-byte symbol was inserted with that
+        // slot as its `first2()`; every other slot falls back to the one-byte code for its low
+        // byte. Rather than visiting all 65,536 slots, bulk-copy the (already rewritten)
+        // `codes_one_byte` row 256 times and then patch the at most 255 symbol slots.
+        self.codes_two_byte.clear();
+        for _ in 0..256 {
+            self.codes_two_byte.extend_from_slice(&self.codes_one_byte);
+        }
+        for &(slot, new_code) in &two_byte_slots[..n_two_byte_slots] {
+            self.codes_two_byte[slot as usize] = Code::new_symbol(new_code, 2);
         }
 
         // Reset values in the hash table as well.
@@ -513,10 +531,7 @@ impl CompressorBuilder {
 /// The number of generations used for training. This is taken from the [FSST paper].
 ///
 /// [FSST paper]: https://www.vldb.org/pvldb/vol13/p2649-boncz.pdf
-#[cfg(not(miri))]
 const GENERATIONS: [usize; 5] = [8usize, 38, 68, 98, 128];
-#[cfg(miri)]
-const GENERATIONS: [usize; 3] = [8usize, 38, 128];
 
 const FSST_SAMPLETARGET: usize = 1 << 14;
 const FSST_SAMPLELINE: usize = 512;
