@@ -98,8 +98,10 @@ fn test_decompress_exact_capacity() {
         builder.build()
     };
 
-    // Create a large, highly compressible string
-    let plaintext = vec![b'a'; 100_000];
+    // Create a large, highly compressible string. Under miri a much smaller buffer still
+    // exercises both the 8-byte block loop and the byte-by-byte tail fallback this test targets,
+    // and miri's cost here is proportional to the buffer size.
+    let plaintext = vec![b'a'; if cfg!(miri) { 2_000 } else { 100_000 }];
 
     // Compress it into an over-allocated buffer to avoid any compression bugs
     let mut compressed = Vec::with_capacity(plaintext.len() * 2);

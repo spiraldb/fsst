@@ -19,10 +19,17 @@ jobs:
       MIRIFLAGS: -Zmiri-strict-provenance -Zmiri-symbolic-alignment-check -Zmiri-backtrace=full
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - name: Run miri with nightly toolchain
+      - name: Install nightly toolchain with miri
         run: |
           rustup toolchain install nightly --component miri
           rustup override set nightly
+      - name: Rust Dependency Cache
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          save-if: ${{ github.ref_name == 'develop' }}
+          shared-key: "miri-cache-${{ runner.os }}"
+      - name: Run miri
+        run: |
           cargo miri setup
           cargo miri test
 
