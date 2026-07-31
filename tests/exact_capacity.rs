@@ -2,7 +2,7 @@
 
 #![cfg(test)]
 
-use fsst::{CompressorBuilder, Decompressor, ESCAPE_CODE, Symbol};
+use fsst::{Compressor, CompressorBuilder, Decompressor, ESCAPE_CODE, Symbol};
 use hegel::generators::{self, Generator};
 
 const SYMBOL_BYTES: [[u8; 8]; 8] = [
@@ -33,6 +33,14 @@ fn padded_symbol_table() -> ([Symbol; 255], [u8; 255]) {
 enum Token {
     Symbol(u8),
     Escape(u8),
+}
+
+fn compressor_with_all_symbol_lengths() -> Compressor {
+    let mut builder = CompressorBuilder::new();
+    for (bytes, len) in SYMBOL_BYTES.iter().zip(SYMBOL_LENGTHS) {
+        assert!(builder.insert(Symbol::from_slice(bytes), len as usize));
+    }
+    builder.build()
 }
 
 fn draw_tokens(tc: &hegel::TestCase) -> Vec<Token> {
@@ -156,4 +164,27 @@ fn decompress_empty_stream_is_empty(tc: hegel::TestCase) {
     let capacity = tc.draw(generators::integers::<usize>().max_value(256));
 
     assert!(decompress_with_capacity(&decompressor, &[], capacity).is_empty());
+}
+
+#[cfg_attr(miri, ignore)]
+#[hegel::test]
+fn compress_into_exact_capacity_matches_compress(tc: hegel::TestCase) {
+    let compressor = compressor_with_all_symbol_lengths();
+    let tokens = tc.draw(
+        generators::vecs(hegel::one_of!(
+            generators::integers::<u8>()
+                .max_value((SYMBOL_BYTES.len() - 1) as u8)
+                .map(Token::Symbol),
+            generators::integers::<u8>().map(Token::Escape),
+        ))
+        .max_size(256),
+    );
+    let (_, plaintext) = model_stream(&tokens);
+
+    let expected = compressor.compress(&plaintext);
+    let mut exact = Vec::with_capacity(expected.len());
+    // SAFETY: exact has the capacity required by the canonical compression result.
+    unsafe { compressor.compress_into(&plaintext, &mut exact) };
+
+    assert_eq!(exact, expected);
 }

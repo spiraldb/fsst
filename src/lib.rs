@@ -748,6 +748,20 @@ impl Compressor {
             last_word = advance_8byte_word(last_word, advance_in);
         }
 
+        if in_ptr < in_end && unsafe { out_end.offset_from(out_ptr) } == 1 {
+            // compress_word writes two bytes speculatively, so use scratch space for a one-byte tail.
+            let mut scratch = [0u8; 2];
+            let (advance_in, advance_out) =
+                unsafe { self.compress_word(last_word, scratch.as_mut_ptr()) };
+            assert_eq!(advance_out, 1, "output buffer sized too small");
+
+            unsafe {
+                out_ptr.write(scratch[0]);
+                out_ptr = out_ptr.add(1);
+                in_ptr = in_ptr.add(advance_in);
+            }
+        }
+
         // in_ptr should have exceeded in_end
         assert!(
             in_ptr >= in_end,
