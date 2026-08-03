@@ -125,6 +125,38 @@ fn test_decompress_exact_capacity() {
     assert_eq!(decompressed, plaintext);
 }
 
+#[test]
+fn decompresses_mixed_length_symbol_blocks() {
+    let (symbols, lengths) = padded_symbol_table();
+    let decompressor = Decompressor::new(&symbols, &lengths);
+    let compressed = [0, 1, 2, 3, 4, 5, 6, 7].repeat(4);
+    let expected_block = SYMBOL_BYTES
+        .iter()
+        .zip(SYMBOL_LENGTHS)
+        .flat_map(|(bytes, length)| &bytes[..length as usize])
+        .copied()
+        .collect::<Vec<_>>();
+    let expected = expected_block.repeat(4);
+
+    let decoded = decompress_with_capacity(
+        &decompressor,
+        &compressed,
+        decompressor.max_decompression_capacity(&compressed) + 7,
+    );
+
+    assert_eq!(decoded, expected);
+}
+
+#[test]
+#[should_panic(expected = "symbol lengths must be between 0 and 8 bytes")]
+fn decompressor_rejects_oversized_symbol_length() {
+    let symbols = [Symbol::ZERO; 255];
+    let mut lengths = [0; 255];
+    lengths[0] = 9;
+
+    let _ = Decompressor::new(&symbols, &lengths);
+}
+
 #[cfg_attr(miri, ignore)]
 #[hegel::test]
 fn decompress_mixed_stream_matches_model(tc: hegel::TestCase) {

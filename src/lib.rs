@@ -12,6 +12,31 @@ use lossy_pht::LossyPHT;
 use std::fmt::{Debug, Formatter};
 use std::mem::MaybeUninit;
 
+#[cfg(any(test, target_arch = "x86_64"))]
+const PAIR_SHUFFLE_MASKS: [[u8; 16]; 9] = [
+    [
+        8, 9, 10, 11, 12, 13, 14, 15, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80,
+    ],
+    [
+        0, 8, 9, 10, 11, 12, 13, 14, 15, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80,
+    ],
+    [
+        0, 1, 8, 9, 10, 11, 12, 13, 14, 15, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80,
+    ],
+    [
+        0, 1, 2, 8, 9, 10, 11, 12, 13, 14, 15, 0x80, 0x80, 0x80, 0x80, 0x80,
+    ],
+    [
+        0, 1, 2, 3, 8, 9, 10, 11, 12, 13, 14, 15, 0x80, 0x80, 0x80, 0x80,
+    ],
+    [
+        0, 1, 2, 3, 4, 8, 9, 10, 11, 12, 13, 14, 15, 0x80, 0x80, 0x80,
+    ],
+    [0, 1, 2, 3, 4, 5, 8, 9, 10, 11, 12, 13, 14, 15, 0x80, 0x80],
+    [0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15, 0x80],
+    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+];
+
 mod builder;
 mod lossy_pht;
 
@@ -235,13 +260,151 @@ pub struct Decompressor<'a> {
 
 impl<'a> Decompressor<'a> {
     /// Returns a new decompressor that uses the provided symbol table.
+    ///
+    /// ## Panics
+    ///
+    /// If a symbol length is greater than eight bytes.
     pub fn new(symbols: &'a [Symbol; 255], lengths: &'a [u8; 255]) -> Self {
+        assert!(
+            lengths
+                .iter()
+                .all(|&length| length <= size_of::<Symbol>() as u8),
+            "symbol lengths must be between 0 and 8 bytes"
+        );
         Self { symbols, lengths }
     }
 
     /// Returns an upper bound on the size of the decompressed data.
     pub fn max_decompression_capacity(&self, compressed: &[u8]) -> usize {
         size_of::<Symbol>() * (compressed.len() + 1)
+    }
+
+    #[inline(always)]
+    unsafe fn store_symbol_block_scalar(&self, next_block: u64, out_ptr: *mut u8) -> *mut u8 {
+        unsafe {
+            let codes = next_block.to_le_bytes();
+            let length0 = *self.lengths.get_unchecked(codes[0] as usize) as usize;
+            let length1 = *self.lengths.get_unchecked(codes[1] as usize) as usize;
+            let length2 = *self.lengths.get_unchecked(codes[2] as usize) as usize;
+            let length3 = *self.lengths.get_unchecked(codes[3] as usize) as usize;
+            let length4 = *self.lengths.get_unchecked(codes[4] as usize) as usize;
+            let length5 = *self.lengths.get_unchecked(codes[5] as usize) as usize;
+            let length6 = *self.lengths.get_unchecked(codes[6] as usize) as usize;
+            let length7 = *self.lengths.get_unchecked(codes[7] as usize) as usize;
+
+            // Resolve every output address before starting the overlapping stores.
+            let offset1 = length0;
+            let offset2 = offset1 + length1;
+            let offset3 = offset2 + length2;
+            let offset4 = offset3 + length3;
+            let offset5 = offset4 + length4;
+            let offset6 = offset5 + length5;
+            let offset7 = offset6 + length6;
+
+            out_ptr
+                .cast::<u64>()
+                .write_unaligned(self.symbols.get_unchecked(codes[0] as usize).to_u64());
+            out_ptr
+                .add(offset1)
+                .cast::<u64>()
+                .write_unaligned(self.symbols.get_unchecked(codes[1] as usize).to_u64());
+            out_ptr
+                .add(offset2)
+                .cast::<u64>()
+                .write_unaligned(self.symbols.get_unchecked(codes[2] as usize).to_u64());
+            out_ptr
+                .add(offset3)
+                .cast::<u64>()
+                .write_unaligned(self.symbols.get_unchecked(codes[3] as usize).to_u64());
+            out_ptr
+                .add(offset4)
+                .cast::<u64>()
+                .write_unaligned(self.symbols.get_unchecked(codes[4] as usize).to_u64());
+            out_ptr
+                .add(offset5)
+                .cast::<u64>()
+                .write_unaligned(self.symbols.get_unchecked(codes[5] as usize).to_u64());
+            out_ptr
+                .add(offset6)
+                .cast::<u64>()
+                .write_unaligned(self.symbols.get_unchecked(codes[6] as usize).to_u64());
+            out_ptr
+                .add(offset7)
+                .cast::<u64>()
+                .write_unaligned(self.symbols.get_unchecked(codes[7] as usize).to_u64());
+
+            out_ptr.add(offset7 + length7)
+        }
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[inline]
+    #[target_feature(enable = "avx2")]
+    unsafe fn store_symbol_block_avx2(&self, next_block: u64, out_ptr: *mut u8) -> *mut u8 {
+        use std::arch::x86_64::{
+            _mm_loadu_si128, _mm_storeu_si128, _mm256_castsi256_si128, _mm256_extracti128_si256,
+            _mm256_set_epi64x, _mm256_set_m128i, _mm256_shuffle_epi8,
+        };
+
+        unsafe {
+            let codes = next_block.to_le_bytes();
+            let length0 = *self.lengths.get_unchecked(codes[0] as usize) as usize;
+            let length1 = *self.lengths.get_unchecked(codes[1] as usize) as usize;
+            let length2 = *self.lengths.get_unchecked(codes[2] as usize) as usize;
+            let length3 = *self.lengths.get_unchecked(codes[3] as usize) as usize;
+            let length4 = *self.lengths.get_unchecked(codes[4] as usize) as usize;
+            let length5 = *self.lengths.get_unchecked(codes[5] as usize) as usize;
+            let length6 = *self.lengths.get_unchecked(codes[6] as usize) as usize;
+            let length7 = *self.lengths.get_unchecked(codes[7] as usize) as usize;
+
+            let offset2 = length0 + length1;
+            let offset4 = offset2 + length2 + length3;
+            let offset6 = offset4 + length4 + length5;
+            let decoded_length = offset6 + length6 + length7;
+
+            // Each 128-bit lane holds two symbols. The shuffle keeps the first
+            // symbol's logical bytes and moves the complete second symbol directly
+            // behind them. The following pair overwrites that second symbol's padding.
+            let symbols03 = _mm256_set_epi64x(
+                self.symbols.get_unchecked(codes[3] as usize).to_u64() as i64,
+                self.symbols.get_unchecked(codes[2] as usize).to_u64() as i64,
+                self.symbols.get_unchecked(codes[1] as usize).to_u64() as i64,
+                self.symbols.get_unchecked(codes[0] as usize).to_u64() as i64,
+            );
+            let masks03 = _mm256_set_m128i(
+                // Decompressor::new guarantees that symbol lengths index this table.
+                _mm_loadu_si128(PAIR_SHUFFLE_MASKS.get_unchecked(length2).as_ptr().cast()),
+                _mm_loadu_si128(PAIR_SHUFFLE_MASKS.get_unchecked(length0).as_ptr().cast()),
+            );
+            let packed03 = _mm256_shuffle_epi8(symbols03, masks03);
+            _mm_storeu_si128(out_ptr.cast(), _mm256_castsi256_si128(packed03));
+            _mm_storeu_si128(
+                out_ptr.add(offset2).cast(),
+                _mm256_extracti128_si256::<1>(packed03),
+            );
+
+            let symbols47 = _mm256_set_epi64x(
+                self.symbols.get_unchecked(codes[7] as usize).to_u64() as i64,
+                self.symbols.get_unchecked(codes[6] as usize).to_u64() as i64,
+                self.symbols.get_unchecked(codes[5] as usize).to_u64() as i64,
+                self.symbols.get_unchecked(codes[4] as usize).to_u64() as i64,
+            );
+            let masks47 = _mm256_set_m128i(
+                _mm_loadu_si128(PAIR_SHUFFLE_MASKS.get_unchecked(length6).as_ptr().cast()),
+                _mm_loadu_si128(PAIR_SHUFFLE_MASKS.get_unchecked(length4).as_ptr().cast()),
+            );
+            let packed47 = _mm256_shuffle_epi8(symbols47, masks47);
+            _mm_storeu_si128(
+                out_ptr.add(offset4).cast(),
+                _mm256_castsi256_si128(packed47),
+            );
+            _mm_storeu_si128(
+                out_ptr.add(offset6).cast(),
+                _mm256_extracti128_si256::<1>(packed47),
+            );
+
+            out_ptr.add(decoded_length)
+        }
     }
 
     /// Decompress a slice of codes into a provided buffer.
@@ -281,6 +444,36 @@ impl<'a> Decompressor<'a> {
             "decoded is smaller than lower-bound decompressed size"
         );
 
+        #[cfg(target_arch = "x86_64")]
+        if compressed.len() > 8
+            && decoded.len() >= 8 * size_of::<Symbol>()
+            && std::arch::is_x86_feature_detected!("avx2")
+        {
+            // SAFETY: the runtime check above establishes AVX2 support.
+            return unsafe { self.decompress_into_avx2(compressed, decoded) };
+        }
+
+        // SAFETY: the implementation checks input and output bounds before accessing
+        // bytes outside the block-loop headroom.
+        unsafe { self.decompress_into_impl::<false>(compressed, decoded) }
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[target_feature(enable = "avx2")]
+    unsafe fn decompress_into_avx2(
+        &self,
+        compressed: &[u8],
+        decoded: &mut [MaybeUninit<u8>],
+    ) -> usize {
+        unsafe { self.decompress_into_impl::<true>(compressed, decoded) }
+    }
+
+    #[inline(always)]
+    unsafe fn decompress_into_impl<const USE_AVX2: bool>(
+        &self,
+        compressed: &[u8],
+        decoded: &mut [MaybeUninit<u8>],
+    ) -> usize {
         unsafe {
             let mut in_ptr = compressed.as_ptr();
             let _in_begin = in_ptr;
@@ -312,24 +505,19 @@ impl<'a> Decompressor<'a> {
                         & ((((!next_block) & 0x7F7F7F7F7F7F7F7F) + 0x7F7F7F7F7F7F7F7F)
                             ^ 0x8080808080808080);
 
-                    // If there are no escape codes, we write each symbol one by one.
+                    // If there are no escape codes, decode the whole block at once.
                     if escape_mask == 0 {
-                        let code = (next_block & 0xFF) as u8;
-                        store_next_symbol!(code);
-                        let code = ((next_block >> 8) & 0xFF) as u8;
-                        store_next_symbol!(code);
-                        let code = ((next_block >> 16) & 0xFF) as u8;
-                        store_next_symbol!(code);
-                        let code = ((next_block >> 24) & 0xFF) as u8;
-                        store_next_symbol!(code);
-                        let code = ((next_block >> 32) & 0xFF) as u8;
-                        store_next_symbol!(code);
-                        let code = ((next_block >> 40) & 0xFF) as u8;
-                        store_next_symbol!(code);
-                        let code = ((next_block >> 48) & 0xFF) as u8;
-                        store_next_symbol!(code);
-                        let code = ((next_block >> 56) & 0xFF) as u8;
-                        store_next_symbol!(code);
+                        #[cfg(target_arch = "x86_64")]
+                        if USE_AVX2 {
+                            out_ptr = self.store_symbol_block_avx2(next_block, out_ptr);
+                        } else {
+                            out_ptr = self.store_symbol_block_scalar(next_block, out_ptr);
+                        }
+                        #[cfg(not(target_arch = "x86_64"))]
+                        {
+                            let _ = USE_AVX2;
+                            out_ptr = self.store_symbol_block_scalar(next_block, out_ptr);
+                        }
                         in_ptr = in_ptr.add(8);
                     } else if (next_block & 0x00FF00FF00FF00FF) == 0x00FF00FF00FF00FF {
                         // All 4 even-positioned bytes are ESCAPE_CODE.
@@ -969,6 +1157,28 @@ pub(crate) fn compare_masked(left: u64, right: u64, ignored_bits: u16) -> bool {
 mod test {
     use super::*;
     use std::{iter, mem};
+
+    #[test]
+    fn pair_shuffle_masks_concatenate_symbols() {
+        let first = *b"abcdefgh";
+        let second = *b"ABCDEFGH";
+        let mut input = [0; 16];
+        input[..8].copy_from_slice(&first);
+        input[8..].copy_from_slice(&second);
+
+        for (length, mask) in PAIR_SHUFFLE_MASKS.iter().enumerate() {
+            let packed = mask.map(|index| {
+                if index & 0x80 == 0 {
+                    input[index as usize]
+                } else {
+                    0
+                }
+            });
+            assert_eq!(&packed[..length], &first[..length]);
+            assert_eq!(&packed[length..length + 8], &second);
+        }
+    }
+
     #[test]
     fn test_stuff() {
         let compressor = {

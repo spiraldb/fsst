@@ -167,6 +167,46 @@ fn bench_decompress_escape_heavy(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_decompress_mixed_lengths(c: &mut Criterion) {
+    let symbol_bytes: [&[u8]; 8] = [
+        b"a",
+        b"bc",
+        b"def",
+        b"ghij",
+        b"klmno",
+        b"pqrstu",
+        b"vwxyz01",
+        b"23456789",
+    ];
+    let mut compressor = CompressorBuilder::new();
+    for bytes in symbol_bytes {
+        assert!(compressor.insert(symbol(bytes), bytes.len()));
+    }
+    let compressor = compressor.build();
+    let decompressor = compressor.decompressor();
+
+    let seed = symbol_bytes.concat();
+    let repetitions = (1024_usize * 1024).div_ceil(seed.len());
+    let test_string = seed.repeat(repetitions);
+    let compressed = compressor.compress(&test_string);
+    assert!(compressed.iter().all(|&code| code != u8::MAX));
+    assert_eq!(decompressor.decompress(&compressed), test_string);
+
+    let mut decoded = Vec::with_capacity(decompressor.max_decompression_capacity(&compressed) + 7);
+    let mut group = c.benchmark_group("decompress-mixed-lengths/1mb");
+    group.throughput(Throughput::Bytes(test_string.len() as u64));
+    group.bench_function("decompress-into-reuse", |b| {
+        b.iter(|| {
+            let len = decompressor.decompress_into(&compressed, decoded.spare_capacity_mut());
+            // SAFETY: decompress_into initializes exactly len bytes.
+            unsafe { decoded.set_len(len) };
+            let _ = std::hint::black_box(&decoded);
+            decoded.clear();
+        })
+    });
+    group.finish();
+}
+
 fn bench_compress(c: &mut Criterion) {
     let mut group = c.benchmark_group("compress-overhead");
     // Reusable memory to hold outputs
@@ -290,6 +330,7 @@ criterion_group!(
     bench_compress,
     bench_rebuild_from,
     bench_decompress_short,
-    bench_decompress_escape_heavy
+    bench_decompress_escape_heavy,
+    bench_decompress_mixed_lengths
 );
 criterion_main!(bench_micro);
