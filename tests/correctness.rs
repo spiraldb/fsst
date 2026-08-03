@@ -141,14 +141,7 @@ fn test_large_with_rebuild() {
     let trained = Compressor::train(&vec![&corpus]);
     let compressed = trained.compress(text.as_bytes());
 
-    // `symbol_table()` / `symbol_lengths()` are padded to 255 entries, so they have to be sliced
-    // to `n_symbols()` before being handed back to `rebuild_from`. Passing the padded arrays
-    // makes the rebuilt table disagree with the trained one whenever the table is not full.
-    let n_symbols = trained.n_symbols();
-    let rebuilt = Compressor::rebuild_from(
-        &trained.symbol_table()[..n_symbols],
-        &trained.symbol_lengths()[..n_symbols],
-    );
+    let rebuilt = Compressor::rebuild_from(trained.symbol_table(), trained.symbol_lengths());
     let recompressed = rebuilt.compress(text.as_bytes());
 
     assert_eq!(compressed, recompressed);
