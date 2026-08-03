@@ -60,11 +60,11 @@ jobs:
         env:
           RUSTFLAGS: "-C target-feature=+avx2"
         run: |
-          cargo codspeed build --profile bench -m instrumentation
+          cargo codspeed build --profile bench -m simulation
 
       - name: Run benchmarks - Instrumentation
         uses: CodSpeedHQ/action@88472375d0a4572cf70a9f1fe3a4e0ab8da1b924 # v5
         with:
           run: cargo codspeed run
           token: ${{ secrets.CODSPEED_TOKEN }}
-          mode: instrumentation
+          mode: simulation
