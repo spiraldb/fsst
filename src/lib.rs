@@ -536,6 +536,18 @@ impl<'a> Decompressor<'a> {
     }
 }
 
+/// Persistable components of a [`Compressor`].
+pub struct CompressorParts {
+    /// Symbols indexed by code.
+    pub symbols: [Symbol; 255],
+
+    /// Symbol lengths in bytes.
+    pub lengths: [u8; 255],
+
+    /// Number of populated symbols, excluding the escape code.
+    pub n_symbols: u8,
+}
+
 /// A compressor that uses a symbol table to greedily compress strings.
 ///
 /// The `Compressor` is the central component of FSST. You can create a compressor either by
@@ -800,22 +812,26 @@ impl Compressor {
     /// Access the decompressor that can be used to decompress strings emitted from this
     /// `Compressor` instance.
     pub fn decompressor(&self) -> Decompressor<'_> {
-        Decompressor::new(self.symbol_table(), self.symbol_lengths())
+        Decompressor::new(&self.symbols, &self.lengths)
     }
 
-    /// Returns a readonly slice of the current symbol table.
-    ///
-    /// The returned slice will have length of `n_symbols`.
-    pub fn symbol_table(&self) -> &[Symbol; 255] {
-        &self.symbols
+    /// Returns the populated symbols, indexed by code.
+    pub fn symbol_table(&self) -> &[Symbol] {
+        &self.symbols[..self.n_symbols()]
     }
 
-    /// Returns a readonly slice where index `i` contains the
-    /// length of the symbol represented by code `i`.
-    ///
-    /// Values range from 1-8.
-    pub fn symbol_lengths(&self) -> &[u8; 255] {
-        &self.lengths
+    /// Returns the populated symbol lengths, indexed by code.
+    pub fn symbol_lengths(&self) -> &[u8] {
+        &self.lengths[..self.n_symbols()]
+    }
+
+    /// Consumes the compressor and returns its persistable parts.
+    pub fn into_parts(self) -> CompressorParts {
+        CompressorParts {
+            symbols: self.symbols,
+            lengths: self.lengths,
+            n_symbols: self.n_symbols,
+        }
     }
 
     /// Number of symbols present in the compressor's symbol table.
