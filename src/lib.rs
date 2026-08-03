@@ -661,13 +661,12 @@ impl Compressor {
         res
     }
 
-    /// Compress a string, writing its result into a target buffer.
+    /// Compress a string, writing its result into the target slice.
     ///
-    /// The target buffer is a byte vector that must have capacity large enough
-    /// to hold the encoded data.
+    /// The target buffer must have enough capacity to hold the encoded data.
     ///
-    /// When this call returns, `values` will hold the compressed bytes and have
-    /// its length set to the length of the compressed text.
+    /// When this call returns, `values` will hold the compressed bytes up to
+    /// return value.
     ///
     /// ```
     /// use fsst::{Compressor, CompressorBuilder, Symbol};
@@ -681,8 +680,9 @@ impl Compressor {
     ///
     /// // SAFETY: we have over-sized compressed_values.
     /// unsafe {
-    ///     compressor.compress_into(b"aaaaaaaa", &mut compressed_values);
-    /// }
+    ///     let valid_length = compressor.compress_into(b"aaaaaaaa", &mut compressed_values);
+    ///     compressed_values.set_len(valid_length);
+    /// };
     ///
     /// assert_eq!(compressed_values, vec![0u8]);
     /// ```
@@ -691,21 +691,20 @@ impl Compressor {
     ///
     /// It is up to the caller to ensure the provided buffer is large enough to hold
     /// all encoded data.
-    pub unsafe fn compress_into(&self, plaintext: &[u8], values: &mut Vec<u8>) {
+    pub unsafe fn compress_into(&self, plaintext: &[u8], values: &mut [MaybeUninit<u8>]) -> usize {
         // input is empty, we must set the output length's to 0.
         if plaintext.is_empty() {
-            values.clear();
-            return;
+            return 0;
         }
 
         let mut in_ptr = plaintext.as_ptr();
-        let mut out_ptr = values.as_mut_ptr();
+        let mut out_ptr = values.as_mut_ptr().cast::<u8>();
 
         // SAFETY: `end` will point just after the end of the `plaintext` slice.
         let in_end = unsafe { in_ptr.byte_add(plaintext.len()) };
         let in_end_sub8 = in_end as usize - 8;
         // SAFETY: `end` will point just after the end of the `values` allocation.
-        let out_end = unsafe { out_ptr.byte_add(values.capacity()) };
+        let out_end = unsafe { out_ptr.byte_add(values.len()) };
 
         while (in_ptr as usize) <= in_end_sub8 && unsafe { out_end.offset_from(out_ptr) } >= 2 {
             // SAFETY: pointer ranges are checked in the loop condition
@@ -771,14 +770,14 @@ impl Compressor {
         assert!(out_ptr <= out_end, "output buffer sized too small");
 
         // SAFETY: out_ptr is derived from the `values` allocation.
-        let bytes_written = unsafe { out_ptr.offset_from(values.as_ptr()) };
+        let bytes_written = unsafe { out_ptr.offset_from(values.as_ptr().cast()) };
         assert!(
             bytes_written >= 0,
             "out_ptr ended before it started, not possible"
         );
 
         // SAFETY: we have initialized `bytes_written` values in the output buffer.
-        unsafe { values.set_len(bytes_written as usize) };
+        bytes_written as usize
     }
 
     /// Use the symbol table to compress the plaintext into a sequence of codes and escapes.
@@ -790,7 +789,10 @@ impl Compressor {
         let mut buffer = Vec::with_capacity(plaintext.len() * 2);
 
         // SAFETY: the largest compressed size would be all escapes == 2*plaintext_len
-        unsafe { self.compress_into(plaintext, &mut buffer) };
+        unsafe {
+            let length = self.compress_into(plaintext, buffer.spare_capacity_mut());
+            buffer.set_len(length);
+        };
 
         buffer
     }

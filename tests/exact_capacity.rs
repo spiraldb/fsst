@@ -106,7 +106,8 @@ fn test_decompress_exact_capacity() {
     // Compress it into an over-allocated buffer to avoid any compression bugs
     let mut compressed = Vec::with_capacity(plaintext.len() * 2);
     unsafe {
-        compressor.compress_into(&plaintext, &mut compressed);
+        let length = compressor.compress_into(&plaintext, compressed.spare_capacity_mut());
+        compressed.set_len(length);
     }
 
     let decompressor = compressor.decompressor();
@@ -150,12 +151,14 @@ fn decompress_mixed_stream_matches_model(tc: hegel::TestCase) {
 #[hegel::test]
 fn compress_into_empty_clears_output(tc: hegel::TestCase) {
     let compressor = CompressorBuilder::new().build();
-    let mut output = tc.draw(generators::binary());
+    let length = tc.draw(generators::integers().max_value(i32::MAX as usize));
+
+    let mut output = Vec::with_capacity(length);
 
     // SAFETY: empty input requires no output capacity.
-    unsafe { compressor.compress_into(&[], &mut output) };
+    let length = unsafe { compressor.compress_into(&[], output.spare_capacity_mut()) };
 
-    assert!(output.is_empty());
+    assert_eq!(length, 0);
 }
 
 #[cfg_attr(miri, ignore)]
@@ -186,7 +189,10 @@ fn compress_into_exact_capacity_matches_compress(tc: hegel::TestCase) {
     let expected = compressor.compress(&plaintext);
     let mut exact = Vec::with_capacity(expected.len());
     // SAFETY: exact has the capacity required by the canonical compression result.
-    unsafe { compressor.compress_into(&plaintext, &mut exact) };
+    unsafe {
+        let length = compressor.compress_into(&plaintext, exact.spare_capacity_mut());
+        exact.set_len(length);
+    };
 
     assert_eq!(exact, expected);
 }
