@@ -680,7 +680,7 @@ impl Compressor {
     ///
     /// // SAFETY: we have over-sized compressed_values.
     /// unsafe {
-    ///     let valid_length = compressor.compress_into(b"aaaaaaaa", &mut compressed_values);
+    ///     let valid_length = compressor.compress_into(b"aaaaaaaa", compressed_values.spare_capacity_mut());
     ///     compressed_values.set_len(valid_length);
     /// };
     ///
