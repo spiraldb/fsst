@@ -203,7 +203,7 @@ fn bench_compress(c: &mut Criterion) {
         let compressor = compressor.build();
 
         b.iter(|| unsafe {
-            compressor.compress_into(&test_string, &mut output_buf);
+            compressor.compress_into(&test_string, output_buf.spare_capacity_mut());
         })
     });
     group.finish();
@@ -220,7 +220,7 @@ fn bench_compress(c: &mut Criterion) {
         let compressor = compressor.build();
 
         b.iter(|| unsafe {
-            compressor.compress_into(&test_string, &mut output_buf);
+            compressor.compress_into(&test_string, output_buf.spare_capacity_mut());
         })
     });
     group.finish();
@@ -234,7 +234,7 @@ fn bench_compress(c: &mut Criterion) {
         let compressor = compressor.build();
 
         b.iter(|| unsafe {
-            compressor.compress_into(&test_string, &mut output_buf);
+            compressor.compress_into(&test_string, output_buf.spare_capacity_mut());
         })
     });
     group.finish();
@@ -248,7 +248,7 @@ fn bench_compress(c: &mut Criterion) {
         let compressor = compressor.build();
 
         b.iter(|| unsafe {
-            compressor.compress_into(&test_string, &mut output_buf);
+            compressor.compress_into(&test_string, output_buf.spare_capacity_mut());
         })
     });
 
@@ -271,7 +271,7 @@ fn bench_compress(c: &mut Criterion) {
     let escape_compressor = CompressorBuilder::new().build();
     group.bench_function("compress", |b| {
         b.iter(|| unsafe {
-            escape_compressor.compress_into(&test_string, &mut output_buf);
+            escape_compressor.compress_into(&test_string, output_buf.spare_capacity_mut());
         })
     });
 

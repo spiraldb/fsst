@@ -70,11 +70,12 @@ fn run_bench(name: &str, buf: &[u8], c: &mut Criterion) {
     let mut buffer = Vec::with_capacity(buf.len() * 2);
     group.throughput(Throughput::Bytes(buf.len() as u64));
     group.bench_function("compress-only", |b| {
-        b.iter(|| unsafe { compressor.compress_into(buf, &mut buffer) });
+        b.iter(|| unsafe { compressor.compress_into(buf, buffer.spare_capacity_mut()) });
     });
 
     unsafe {
-        compressor.compress_into(buf, &mut buffer);
+        let length = compressor.compress_into(buf, buffer.spare_capacity_mut());
+        buffer.set_len(length);
     };
     let decompressor = compressor.decompressor();
     group.bench_function("decompress", |b| {
