@@ -74,7 +74,8 @@ fn run_bench(name: &str, buf: &[u8], c: &mut Criterion) {
     });
 
     unsafe {
-        compressor.compress_into(buf, buffer.spare_capacity_mut());
+        let length = compressor.compress_into(buf, buffer.spare_capacity_mut());
+        buffer.set_len(length);
     };
     let decompressor = compressor.decompressor();
     group.bench_function("decompress", |b| {
