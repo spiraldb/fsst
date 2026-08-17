@@ -420,10 +420,16 @@ dependencies = [
 ]
 
 [[package]]
-name = "hegeltest"
-version = "0.28.6"
+name = "hashbrown"
+version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf497519646d08fd2314db0362e32bd40ddc8231bcc5d1abb0515c1d01f55072"
+checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
+
+[[package]]
+name = "hegeltest"
+version = "0.30.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "03ce97c2a8e446df68085bfb3bd35d4aaf61e1830af32fe68fa2b1721fbe5498"
 dependencies = [
  "crc32fast",
  "dashu-int",
@@ -439,24 +445,26 @@ dependencies = [
 
 [[package]]
 name = "hegeltest-c"
-version = "0.30.3"
+version = "0.32.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a65f35c44d45b70f12a53a268eefb0f3e368b4032d255a2740188921c5313a79"
+checksum = "dc142f28259d4695abe3f9cb1045fa0274a6a872559a0a2f746b15a892c84f37"
 dependencies = [
- "crc32fast",
  "dashu-int",
+ "hashbrown",
+ "libm",
  "miniz_oxide",
- "parking_lot",
+ "once_cell",
  "rand",
  "rustc-hash",
- "tempfile",
+ "rustix",
+ "windows-sys",
 ]
 
 [[package]]
 name = "hegeltest-macros"
-version = "0.28.6"
+version = "0.30.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "598464d226b6ddafd3ac6e112e2a469ba7263d5cb5b57122e86cffe0ebf88d81"
+checksum = "e1b8ecba5ad9a1228d2f30dad0c6c2720f019afcb5c5878a0efb123282eae19e"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -511,6 +519,12 @@ name = "libc"
 version = "0.2.189"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3eaf3ede3fee6db1a4c2ee091bf8a8b4dccdc6d17f656fb07896ee72867612f2"
+
+[[package]]
+name = "libm"
+version = "0.2.16"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
 
 [[package]]
 name = "libz-sys"
