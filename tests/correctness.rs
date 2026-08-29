@@ -230,3 +230,32 @@ fn test_pruning_small_input() {
     let compressed = compressor.compress(&corpus);
     assert_eq!(compressor.decompressor().decompress(&compressed), corpus);
 }
+
+/// The compression loop evaluates the masked symbol comparison before it has established that
+/// the hash slot is in use, so an unused slot (whose stored symbol is zero and whose
+/// `ignored_bits` is 64) must never be mistaken for a match. An all-zero word probing an unused
+/// slot is the case that catches it: with a full-width mask, `word & mask` would equal the
+/// slot's zero symbol.
+#[test]
+fn test_zero_word_does_not_match_unused_hash_slot() {
+    let mut builder = CompressorBuilder::new();
+    // A single three-byte symbol, so the hash table has exactly one slot in use.
+    assert!(builder.insert(Symbol::from_slice(b"xyz\0\0\0\0\0"), 3));
+    let compressor = builder.build();
+
+    for len in [1usize, 7, 8, 9, 16, 33, 64] {
+        let corpus = vec![0u8; len];
+        let compressed = compressor.compress(&corpus);
+        assert_eq!(
+            compressor.decompressor().decompress(&compressed),
+            corpus,
+            "all-zero input of length {len} did not round trip"
+        );
+        // Every byte is an escape: no symbol in the table matches a zero byte.
+        assert_eq!(
+            compressed.len(),
+            2 * len,
+            "length {len} should be all escapes"
+        );
+    }
+}
