@@ -259,3 +259,158 @@ fn test_zero_word_does_not_match_unused_hash_slot() {
         );
     }
 }
+
+/// `compress_bulk_into` must produce, for every value, exactly the bytes `compress` would
+/// produce for that value on its own, so any single value can be decompressed from its range.
+fn check_bulk(compressor: &Compressor, values: &[&[u8]], label: &str) {
+    let mut output = Vec::new();
+    let mut offsets = Vec::new();
+    compressor.compress_bulk_into(values, &mut output, &mut offsets);
+
+    assert_eq!(offsets.len(), values.len(), "{label}: one offset per value");
+    let mut start = 0usize;
+    for (i, value) in values.iter().enumerate() {
+        let end = offsets[i] as usize;
+        assert!(
+            start <= end && end <= output.len(),
+            "{label}: value {i} has a bogus range"
+        );
+        assert_eq!(
+            &output[start..end],
+            compressor.compress(value),
+            "{label}: value {i}"
+        );
+        assert_eq!(
+            compressor.decompressor().decompress(&output[start..end]),
+            *value,
+            "{label}: value {i} round trip"
+        );
+        start = end;
+    }
+    assert_eq!(start, output.len(), "{label}: output has trailing bytes");
+}
+
+#[test]
+fn test_compress_bulk_into_matches_compress() {
+    let lines: Vec<&[u8]> = DECLARATION.as_bytes().split(|&b| b == b'\n').collect();
+    let compressor = Compressor::train(&lines);
+    check_bulk(&compressor, &lines, "declaration");
+
+    // Fewer values than cursors, and counts either side of the cursor count, exercise the
+    // serial fallback and the drain that runs once the first cursor runs out of values.
+    for n in [0usize, 1, 2, 3, 4, 5, 6, 7, 8, 9, 17] {
+        check_bulk(
+            &compressor,
+            &lines[..n.min(lines.len())],
+            &format!("declaration[..{n}]"),
+        );
+    }
+}
+
+#[test]
+fn test_compress_bulk_into_ragged_values() {
+    let long = &ART_OF_WAR.as_bytes()[..scaled(ART_OF_WAR.len(), 512)];
+    let compressor = Compressor::train(&vec![long]);
+
+    // Values shorter than a word never enter the interleaved loop at all, and empty values must
+    // still get an offset.
+    let values: Vec<&[u8]> = vec![
+        b"",
+        b"a",
+        b"",
+        b"abcdefg",
+        b"abcdefgh",
+        b"abcdefghi",
+        long,
+        b"",
+        b"zz",
+    ];
+    check_bulk(&compressor, &values, "ragged");
+
+    // One long value beside many short ones leaves the cursors badly unbalanced.
+    let mut skewed: Vec<&[u8]> = vec![long];
+    skewed.extend(std::iter::repeat_n(b"xy".as_slice(), scaled(64, 8)));
+    check_bulk(&compressor, &skewed, "skewed");
+}
+
+#[test]
+fn test_compress_bulk_into_appends() {
+    let lines: Vec<&[u8]> = PREAMBLE.as_bytes().split(|&b| b == b'\n').collect();
+    let compressor = Compressor::train(&lines);
+
+    let mut fresh_output = Vec::new();
+    let mut fresh_offsets = Vec::new();
+    compressor.compress_bulk_into(&lines, &mut fresh_output, &mut fresh_offsets);
+
+    // Existing contents are preserved, and the offsets returned are absolute indices into the
+    // output, so they are shifted by whatever was already there.
+    let mut output = vec![0xAA; 5];
+    let mut offsets = vec![u64::MAX; 2];
+    compressor.compress_bulk_into(&lines, &mut output, &mut offsets);
+
+    assert_eq!(&output[..5], &[0xAA; 5]);
+    assert_eq!(&offsets[..2], &[u64::MAX; 2]);
+    assert_eq!(&output[5..], &fresh_output[..]);
+    for (shifted, fresh) in offsets[2..].iter().zip(&fresh_offsets) {
+        assert_eq!(*shifted, fresh + 5);
+    }
+}
+
+#[test]
+fn test_compress_bulk_into_cursor_counts_agree() {
+    let corpus = &DECLARATION.as_bytes()[..scaled(DECLARATION.len(), 512)];
+    let lines: Vec<&[u8]> = corpus.split(|&b| b == b'\n').collect();
+    let compressor = Compressor::train(&lines);
+
+    let mut expected_output = Vec::new();
+    let mut expected_offsets = Vec::new();
+    compressor.compress_bulk_lanes::<1>(&lines, &mut expected_output, &mut expected_offsets);
+
+    // The cursor count is a scheduling choice; it must not change a single output byte.
+    fn compare<const K: usize>(c: &Compressor, lines: &[&[u8]], output: &[u8], offsets: &[u64]) {
+        let mut got_output = Vec::new();
+        let mut got_offsets = Vec::new();
+        c.compress_bulk_lanes::<K>(lines, &mut got_output, &mut got_offsets);
+        assert_eq!(got_output, output, "K={K} output");
+        assert_eq!(got_offsets, offsets, "K={K} offsets");
+    }
+    compare::<2>(&compressor, &lines, &expected_output, &expected_offsets);
+    compare::<3>(&compressor, &lines, &expected_output, &expected_offsets);
+    compare::<4>(&compressor, &lines, &expected_output, &expected_offsets);
+    compare::<8>(&compressor, &lines, &expected_output, &expected_offsets);
+}
+
+/// Every cursor is handed an output slice sized at two bytes per byte of its own input, which is
+/// exactly what an all-escape value consumes. An empty symbol table makes every value hit that
+/// bound at once, so nothing is left over for a cursor that overruns its slice.
+#[test]
+fn test_compress_bulk_into_all_escape_fills_every_slice() {
+    let compressor = CompressorBuilder::new().build();
+
+    // Lengths either side of a word, so cursors reach the bound both inside the interleaved
+    // loop and in the per-value remainder.
+    let owned: Vec<Vec<u8>> = (0..scaled(64, 12))
+        .map(|i| (0..=255u8).cycle().take(i * 3 + 1).collect())
+        .collect();
+    let values: Vec<&[u8]> = owned.iter().map(|value| value.as_slice()).collect();
+
+    let mut output = Vec::new();
+    let mut offsets = Vec::new();
+    compressor.compress_bulk_into(&values, &mut output, &mut offsets);
+
+    let mut start = 0usize;
+    for (i, value) in values.iter().enumerate() {
+        let end = offsets[i] as usize;
+        assert_eq!(
+            end - start,
+            value.len() * 2,
+            "value {i} should be all escapes"
+        );
+        assert_eq!(
+            compressor.decompressor().decompress(&output[start..end]),
+            *value
+        );
+        start = end;
+    }
+    assert_eq!(start, output.len());
+}
