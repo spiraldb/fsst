@@ -23,6 +23,50 @@ const fn scaled(full: usize, under_miri: usize) -> usize {
     if cfg!(miri) { under_miri } else { full }
 }
 
+fn fnv1a64(bytes: impl IntoIterator<Item = u8>) -> u64 {
+    let mut hash = 0xcbf29ce484222325;
+    for byte in bytes {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash
+}
+
+fn training_golden(input: &str) -> (usize, u64, usize, u64) {
+    let trained = Compressor::train(&vec![input.as_bytes()]);
+    let table_fingerprint = fnv1a64(
+        trained
+            .symbol_table()
+            .iter()
+            .flat_map(|symbol| symbol.to_u64().to_le_bytes())
+            .chain(trained.symbol_lengths().iter().copied()),
+    );
+    let compressed = trained.compress(input.as_bytes());
+
+    (
+        trained.n_symbols(),
+        table_fingerprint,
+        compressed.len(),
+        fnv1a64(compressed),
+    )
+}
+
+// Full-corpus training is prohibitively slow under Miri.
+#[cfg_attr(miri, ignore)]
+#[test]
+fn test_training_is_cross_architecture_deterministic() {
+    // These goldens guard against x86_64 and aarch64 hashbrown iteration-order differences.
+    // When training intentionally changes, regenerate them by temporarily printing these tuples.
+    assert_eq!(
+        training_golden(DECLARATION),
+        (243, 2302118744919910234, 3736, 16602696328334332958),
+    );
+    assert_eq!(
+        training_golden(ART_OF_WAR),
+        (239, 11323366151389446290, 4744, 10727487692352854482),
+    );
+}
+
 #[test]
 fn test_basic() {
     // Roundtrip the declaration

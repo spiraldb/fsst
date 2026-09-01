@@ -850,8 +850,10 @@ struct Candidate {
 }
 
 impl Candidate {
-    fn comparable_form(&self) -> (usize, usize) {
-        (self.gain, self.symbol.len())
+    // The content tie-breaker makes training deterministic regardless of hash-map iteration order,
+    // which varies by architecture with hashbrown's SIMD group width.
+    fn comparable_form(&self) -> (usize, usize, u64) {
+        (self.gain, self.symbol.len(), self.symbol.to_u64())
     }
 }
 
@@ -871,16 +873,51 @@ impl PartialOrd<Self> for Candidate {
 
 impl Ord for Candidate {
     fn cmp(&self, other: &Self) -> Ordering {
-        let self_ord = (self.gain, self.symbol.len());
-        let other_ord = (other.gain, other.symbol.len());
-
-        self_ord.cmp(&other_ord)
+        self.comparable_form().cmp(&other.comparable_form())
     }
 }
 
 #[cfg(test)]
 mod test {
-    use crate::{Compressor, ESCAPE_CODE, builder::CodesBitmap};
+    use super::Candidate;
+    use crate::{Compressor, ESCAPE_CODE, Symbol, builder::CodesBitmap};
+    use std::collections::BinaryHeap;
+
+    #[test]
+    fn test_candidate_heap_order_is_insertion_order_independent() {
+        let candidates = [
+            Candidate {
+                gain: 10,
+                symbol: Symbol::from_slice(b"aa\0\0\0\0\0\0"),
+            },
+            Candidate {
+                gain: 10,
+                symbol: Symbol::from_slice(b"bb\0\0\0\0\0\0"),
+            },
+            Candidate {
+                gain: 10,
+                symbol: Symbol::from_slice(b"cc\0\0\0\0\0\0"),
+            },
+            Candidate {
+                gain: 10,
+                symbol: Symbol::from_slice(b"dd\0\0\0\0\0\0"),
+            },
+        ];
+        let insertion_orders = [[0, 1, 2, 3], [1, 2, 3, 0], [2, 3, 0, 1], [3, 2, 1, 0]];
+
+        let pop_sequences: Vec<Vec<Symbol>> = insertion_orders
+            .into_iter()
+            .map(|order| {
+                let mut heap = BinaryHeap::new();
+                heap.extend(order.map(|index| candidates[index]));
+                std::iter::from_fn(|| heap.pop().map(|candidate| candidate.symbol)).collect()
+            })
+            .collect();
+
+        for sequence in &pop_sequences[1..] {
+            assert_eq!(sequence, &pop_sequences[0]);
+        }
+    }
 
     #[test]
     fn test_builder() {
