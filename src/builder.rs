@@ -843,26 +843,10 @@ impl CompressorBuilder {
 /// A candidate for inclusion in a symbol table.
 ///
 /// This is really only useful for the `optimize` step of training.
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 struct Candidate {
     gain: usize,
     symbol: Symbol,
-}
-
-impl Candidate {
-    // The content tie-breaker makes training deterministic regardless of hash-map iteration order,
-    // which varies by architecture with hashbrown's SIMD group width.
-    fn comparable_form(&self) -> (usize, usize, u64) {
-        (self.gain, self.symbol.len(), self.symbol.to_u64())
-    }
-}
-
-impl Eq for Candidate {}
-
-impl PartialEq<Self> for Candidate {
-    fn eq(&self, other: &Self) -> bool {
-        self.comparable_form().eq(&other.comparable_form())
-    }
 }
 
 impl PartialOrd<Self> for Candidate {
@@ -873,7 +857,13 @@ impl PartialOrd<Self> for Candidate {
 
 impl Ord for Candidate {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.comparable_form().cmp(&other.comparable_form())
+        // The content tie-breaker makes training deterministic regardless of hash-map iteration
+        // order, which varies by architecture with hashbrown's SIMD group width.
+        (self.gain, self.symbol.len(), self.symbol.to_u64()).cmp(&(
+            other.gain,
+            other.symbol.len(),
+            other.symbol.to_u64(),
+        ))
     }
 }
 
