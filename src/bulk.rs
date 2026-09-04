@@ -8,7 +8,7 @@
 use std::mem::MaybeUninit;
 use std::ptr;
 
-use crate::Compressor;
+use crate::{Compressor, advance_8byte_word};
 
 /// Number of independent cursors [`Compressor::compress_bulk_into`] interleaves.
 ///
@@ -139,10 +139,15 @@ impl Compressor {
         }
         lane_out_base[K] = cursor;
 
-        // End offset of every value, relative to `spare_ptr`, before the lanes are compacted.
-        let mut ends = vec![0u64; values.len()];
+        // Write the temporary, pre-compaction ends directly into the offsets allocation. Every
+        // value gets exactly one end before the length is exposed, so this avoids allocating and
+        // zeroing a second values-sized array only to copy it into `offsets` afterward.
+        let offsets_base = offsets.len();
+        // SAFETY: `offsets` reserved room for every value above. Nothing touches its allocation
+        // again until all ends are written and the length is updated.
+        let ends_ptr = unsafe { offsets.as_mut_ptr().add(offsets_base) };
 
-        let mut lanes: [Lane; MAX_LANES] = std::array::from_fn(|_| Lane {
+        let mut lanes: [Lane; K] = std::array::from_fn(|_| Lane {
             in_ptr: ptr::null(),
             in_end: ptr::null(),
             out_ptr: ptr::null_mut(),
@@ -170,7 +175,7 @@ impl Compressor {
             for lane in 0..K {
                 while (lanes[lane].in_ptr as usize) + 8 > lanes[lane].in_end as usize {
                     // SAFETY: the lane's pointers are within its own value and output slice.
-                    unsafe { self.finish_value(&mut lanes[lane], values, spare_ptr, &mut ends) };
+                    unsafe { self.finish_value(&mut lanes[lane], values, spare_ptr, ends_ptr) };
                     lanes[lane].value += 1;
                     if lanes[lane].value == lanes[lane].value_end {
                         break 'interleaved;
@@ -184,12 +189,16 @@ impl Compressor {
 
             // One step of every cursor. These are independent, so their symbol-table lookups
             // overlap instead of serializing.
-            for lane in &mut lanes[..K] {
+            for lane in &mut lanes {
                 // SAFETY: the check above leaves at least 8 readable bytes in the current value,
                 // and the lane's output slice has room for two bytes per input byte consumed.
                 unsafe {
                     let word = ptr::read_unaligned(lane.in_ptr as *const u64);
-                    let (advance_in, advance_out) = self.compress_word(word, lane.out_ptr);
+                    let (advance_in, advance_out) = if K == 1 {
+                        self.compress_word(word, lane.out_ptr)
+                    } else {
+                        self.compress_word_branchless(word, lane.out_ptr)
+                    };
                     lane.in_ptr = lane.in_ptr.add(advance_in);
                     lane.out_ptr = lane.out_ptr.add(advance_out);
                 }
@@ -200,7 +209,7 @@ impl Compressor {
         for lane in 0..K {
             while lanes[lane].value < lanes[lane].value_end {
                 // SAFETY: as above.
-                unsafe { self.finish_value(&mut lanes[lane], values, spare_ptr, &mut ends) };
+                unsafe { self.finish_value(&mut lanes[lane], values, spare_ptr, ends_ptr) };
                 lanes[lane].value += 1;
                 if lanes[lane].value < lanes[lane].value_end {
                     let bytes = values[lanes[lane].value];
@@ -210,6 +219,12 @@ impl Compressor {
                 }
             }
         }
+
+        // Every value's end has now been initialized.
+        // SAFETY: each of the K non-empty lane ranges covers a disjoint part of `values`, and the
+        // loops above finish every value in every range exactly once.
+        unsafe { offsets.set_len(offsets_base + values.len()) };
+        let ends = &mut offsets[offsets_base..];
 
         // The lanes wrote into disjoint slices sized for the worst case, so the compressed bytes
         // are separated by gaps. Slide each lane down onto the end of the previous one, and shift
@@ -229,8 +244,8 @@ impl Compressor {
                 unsafe { ptr::copy(spare_ptr.add(lane_start), spare_ptr.add(written), lane_len) };
             }
             let shift = (lane_start - written) as u64;
-            for end in &ends[bounds[lane]..bounds[lane + 1]] {
-                offsets.push(end - shift + base as u64);
+            for end in &mut ends[bounds[lane]..bounds[lane + 1]] {
+                *end = *end - shift + base as u64;
             }
             written += lane_len;
         }
@@ -249,7 +264,7 @@ impl Compressor {
         lane: &mut Lane,
         values: &[&[u8]],
         spare_ptr: *mut u8,
-        ends: &mut [u64],
+        ends_ptr: *mut u64,
     ) {
         let bytes = values[lane.value];
         // SAFETY: `in_ptr` is within the value, by the caller's contract.
@@ -265,14 +280,56 @@ impl Compressor {
             let out = unsafe {
                 std::slice::from_raw_parts_mut(lane.out_ptr.cast::<MaybeUninit<u8>>(), capacity)
             };
-            // SAFETY: `out` is large enough for the worst case, as argued above.
-            let written = unsafe { self.compress_into(rest, out) };
+            // The interleaved loop normally leaves fewer than eight bytes. Avoid sending that
+            // common case through the general compression loop, whose output-bound checks and
+            // one-byte-capacity fallback are unnecessary with the worst-case-sized lane slice.
+            let written = if rest.len() < 8 {
+                // SAFETY: `out` has room for two bytes per input byte.
+                unsafe { self.compress_tail(rest, out.as_mut_ptr().cast()) }
+            } else {
+                // SAFETY: `out` is large enough for the worst case, as argued above.
+                unsafe { self.compress_into(rest, out) }
+            };
             // SAFETY: `written` bytes were just written into the lane's slice.
             lane.out_ptr = unsafe { lane.out_ptr.add(written) };
         }
 
         // SAFETY: `out_ptr` is derived from `spare_ptr`.
-        ends[lane.value] = unsafe { lane.out_ptr.offset_from(spare_ptr) } as u64;
+        // SAFETY: the caller reserved one offset per input value, and each lane's value index is
+        // within that range and disjoint from every other lane's range.
+        unsafe {
+            ends_ptr
+                .add(lane.value)
+                .write(lane.out_ptr.offset_from(spare_ptr) as u64)
+        };
+    }
+
+    /// Compress a non-empty tail shorter than a word into worst-case-sized output storage.
+    ///
+    /// # Safety
+    ///
+    /// `out_ptr` must have room for two bytes per input byte.
+    unsafe fn compress_tail(&self, input: &[u8], out_ptr: *mut u8) -> usize {
+        debug_assert!(!input.is_empty() && input.len() < 8);
+
+        let mut bytes = [0u8; 8];
+        // SAFETY: the source contains `input.len()` bytes, and the eight-byte destination does too.
+        unsafe { ptr::copy_nonoverlapping(input.as_ptr(), bytes.as_mut_ptr(), input.len()) };
+        let mut word = u64::from_le_bytes(bytes);
+        let mut consumed = 0usize;
+        let mut written = 0usize;
+
+        while consumed < input.len() {
+            // SAFETY: the caller provided worst-case-sized output. At least one input byte remains,
+            // so at least two writable output bytes remain for the speculative escape write.
+            let (advance_in, advance_out) =
+                unsafe { self.compress_word(word, out_ptr.add(written)) };
+            consumed += advance_in;
+            written += advance_out;
+            word = advance_8byte_word(word, advance_in);
+        }
+
+        written
     }
 
     /// Compress every value one after another, with no interleaving.
