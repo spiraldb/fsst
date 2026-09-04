@@ -622,12 +622,73 @@ impl Compressor {
         // SAFETY: codes_two_byte has exactly 65536 entries and `word as u16` is always in [0, 65535].
         let code_twobyte = unsafe { *self.codes_two_byte.get_unchecked(word as u16 as usize) };
 
-        // Peek ahead: probe the hash table unconditionally, so its load issues alongside the
-        // two-byte load rather than behind a data-dependent branch.
-        //
-        // The two probes are independent, so the out-of-order engine overlaps their latency, and
-        // the loop body becomes straight-line code that ends in a select. That trades a probe we
-        // may not need for the mispredicts of a branch that is close to a coin flip on mixed text.
+        if code_twobyte.code() < self.has_suffix_code {
+            // 2 byte code without having to worry about longer matches.
+            // SAFETY: out_ptr is not null.
+            unsafe { std::ptr::write(out_ptr, code_twobyte.code()) };
+
+            // Advance input by symbol length (2) and output by a single code byte
+            (2, 1)
+        } else {
+            // Probe the hash table
+            let entry = self.lossy_pht.lookup(word);
+
+            // Now, downshift the `word` and the `entry` to see if they align.
+            let ignored_bits = entry.ignored_bits;
+            if entry.code != Code::UNUSED
+                && compare_masked(word, entry.symbol.to_u64(), ignored_bits)
+            {
+                // Advance the input by the symbol length (variable) and the output by one code byte
+                // SAFETY: out_ptr is not null.
+                unsafe { std::ptr::write(out_ptr, entry.code.code()) };
+                (entry.code.len() as usize, 1)
+            } else {
+                // SAFETY: out_ptr is not null
+                unsafe { std::ptr::write(out_ptr, code_twobyte.code()) };
+
+                // Advance the input by the symbol length (variable) and the output by either 1
+                // byte (if was one-byte code) or two bytes (escape).
+                (
+                    code_twobyte.len() as usize,
+                    // Predicated version of:
+                    //
+                    // if entry.code >= 256 {
+                    //      2
+                    // } else {
+                    //      1
+                    // }
+                    1 + (code_twobyte.extended_code() >> 8) as usize,
+                )
+            }
+        }
+    }
+
+    /// Branchless variant of [`Self::compress_word`] used when several independent cursors are
+    /// interleaved.
+    ///
+    /// Probing both lookup tables unconditionally avoids a branch misprediction flushing every
+    /// cursor currently in flight. A single cursor uses [`Self::compress_word`] instead, because
+    /// avoiding the unnecessary hash probe is faster on predictable inputs.
+    ///
+    /// # Safety
+    ///
+    /// `out_ptr` must never be NULL or otherwise point to invalid memory.
+    pub(crate) unsafe fn compress_word_branchless(
+        &self,
+        word: u64,
+        out_ptr: *mut u8,
+    ) -> (usize, usize) {
+        // Speculatively write the first byte of `word` at offset 1. This is necessary if it is an
+        // escape, and if it isn't, it will be overwritten anyway.
+        let first_byte = word as u8;
+        // SAFETY: out_ptr is not null.
+        unsafe { out_ptr.byte_add(1).write_unaligned(first_byte) };
+
+        // SAFETY: codes_two_byte has exactly 65536 entries and `word as u16` is always in
+        // [0, 65535].
+        let code_twobyte = unsafe { *self.codes_two_byte.get_unchecked(word as u16 as usize) };
+
+        // Issue the independent hash-table probe alongside the two-byte table load.
         let entry = self.lossy_pht.lookup(word);
 
         // `&` rather than `&&`: short-circuiting would reintroduce the branches this is removing.
@@ -636,22 +697,11 @@ impl Compressor {
             & compare_masked_lenient(word, entry.symbol.to_u64(), entry.ignored_bits);
 
         let (code, advance_in, advance_out) = if use_pht {
-            // Advance the input by the symbol length (variable) and the output by one code byte.
             (entry.code.code(), entry.code.len() as usize, 1)
         } else {
-            // Either a two-byte code that cannot have a longer match, or a one-byte code or
-            // escape. Advance the input by the symbol length and the output by either 1 byte
-            // (one-byte code) or 2 bytes (escape).
             (
                 code_twobyte.code(),
                 code_twobyte.len() as usize,
-                // Predicated version of:
-                //
-                // if code_twobyte.extended_code() >= 256 {
-                //      2
-                // } else {
-                //      1
-                // }
                 1 + (code_twobyte.extended_code() >> 8) as usize,
             )
         };
