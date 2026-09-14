@@ -36,7 +36,8 @@ rustc-hash = "2.1.1"
 [dev-dependencies]
 criterion = { package = "codspeed-criterion-compat", version = "5.0" }
 curl = "0.4"
-hegeltest = "0.44.0"
+# Miri cannot build the shared library used by Hegel's default engine.
+hegeltest = { version = "0.44.0", features = ["static-engine"] }
 
 [[example]]
 name = "round_trip"

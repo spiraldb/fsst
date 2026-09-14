@@ -29,7 +29,7 @@ fn padded_symbol_table() -> ([Symbol; 255], [u8; 255]) {
     (symbols, lengths)
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, hegel::PrettyPrintable)]
 enum Token {
     Symbol(u8),
     Escape(u8),
