@@ -147,26 +147,19 @@ impl Compressor {
         // again until all ends are written and the length is updated.
         let ends_ptr = unsafe { offsets.as_mut_ptr().add(offsets_base) };
 
-        let mut lanes: [Lane; K] = std::array::from_fn(|_| Lane {
-            in_ptr: ptr::null(),
-            in_end: ptr::null(),
-            out_ptr: ptr::null_mut(),
-            value: 0,
-            value_end: 0,
-        });
-        for lane in 0..K {
-            let value = bounds[lane];
+        let mut lanes: [Lane; K] = std::array::from_fn(|i| {
+            let value = bounds[i];
             let bytes = values[value];
-            lanes[lane] = Lane {
+            Lane {
                 in_ptr: bytes.as_ptr(),
                 // SAFETY: one past the end of the value's own allocation.
                 in_end: unsafe { bytes.as_ptr().add(bytes.len()) },
                 // SAFETY: `lane_out_base[lane]` is within the reserved spare capacity.
-                out_ptr: unsafe { spare_ptr.add(lane_out_base[lane]) },
+                out_ptr: unsafe { spare_ptr.add(lane_out_base[i]) },
                 value,
-                value_end: bounds[lane + 1],
-            };
-        }
+                value_end: bounds[i + 1],
+            }
+        });
 
         'interleaved: loop {
             // Bring every lane up to at least a full word of input, finishing values and moving
