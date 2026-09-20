@@ -86,10 +86,6 @@ fn run_bench(name: &str, buf: &[u8], c: &mut Criterion) {
         });
     });
 
-    group.bench_function("compress-bulk", |b| {
-        b.iter_with_large_drop(|| compressor.compress_bulk(std::hint::black_box(&lines)));
-    });
-
     unsafe {
         let length = compressor.compress_into(buf, buffer.spare_capacity_mut());
         buffer.set_len(length);
