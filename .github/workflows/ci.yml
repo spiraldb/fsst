@@ -63,7 +63,7 @@ jobs:
           cargo codspeed build --profile bench -m simulation
 
       - name: Run benchmarks - Instrumentation
-        uses: CodSpeedHQ/action@373d6868929f444bc08d901fd0eb0ad52a8875ea # v5
+        uses: CodSpeedHQ/action@c4fd08a3a159bd0cc208da1e0edf32b8c47d75e5 # v5
         with:
           run: cargo codspeed run
           token: ${{ secrets.CODSPEED_TOKEN }}
