@@ -16,12 +16,6 @@ use crate::{Compressor, advance_8byte_word};
 /// each iteration outgrows the register file.
 const LANES: usize = 4;
 
-/// Largest lane count the fixed-size per-lane arrays below can hold.
-///
-/// Throughput already falls off well before this, so the ceiling only has to be high enough to
-/// measure the falloff.
-const MAX_LANES: usize = 16;
-
 /// State of a single cursor.
 struct Lane {
     /// Next input byte to consume.
@@ -32,8 +26,12 @@ struct Lane {
     out_ptr: *mut u8,
     /// Index of the value currently being compressed.
     value: usize,
+    /// First value index owned by this lane.
+    value_start: usize,
     /// One past the last value index owned by this lane.
     value_end: usize,
+    /// Start of this lane's output slice, relative to the start of the spare capacity.
+    out_base: usize,
 }
 
 impl Compressor {
@@ -81,9 +79,7 @@ impl Compressor {
     /// [`Self::compress_bulk_into`] with the cursor count exposed, so the best value for a given
     /// machine can be measured rather than assumed.
     ///
-    /// # Panics
-    ///
-    /// Panics unless `K` is in `1..=16`.
+    /// `K` must be at least one; `K == 0` is rejected when the function is instantiated.
     #[doc(hidden)]
     pub fn compress_bulk_lanes<const K: usize>(
         &self,
@@ -91,10 +87,8 @@ impl Compressor {
         output: &mut Vec<u8>,
         offsets: &mut Vec<u64>,
     ) {
-        assert!(
-            K > 0 && K <= MAX_LANES,
-            "lane count must be in 1..={MAX_LANES}"
-        );
+        // With no cursors the interleaved loop below would never make progress.
+        const { assert!(K > 0, "at least one cursor is required") };
         if values.is_empty() {
             return;
         }
@@ -117,28 +111,6 @@ impl Compressor {
             return;
         }
 
-        // Split the values into K contiguous ranges. Splitting by index rather than by byte
-        // count keeps every lane non-empty, and values within one array are usually of similar
-        // length, so the ranges come out close to balanced anyway.
-        let mut bounds = [0usize; MAX_LANES + 1];
-        for (lane, bound) in bounds.iter_mut().enumerate().take(K + 1) {
-            *bound = lane * values.len() / K;
-        }
-
-        // Give each lane a disjoint slice of the output, sized to the worst case for its own
-        // values, so lanes never contend and no bounds check is needed in the interleaved loop.
-        let mut lane_out_base = [0usize; MAX_LANES + 1];
-        let mut cursor = 0usize;
-        for lane in 0..K {
-            lane_out_base[lane] = cursor;
-            let bytes: usize = values[bounds[lane]..bounds[lane + 1]]
-                .iter()
-                .map(|value| value.len())
-                .sum();
-            cursor += 2 * bytes;
-        }
-        lane_out_base[K] = cursor;
-
         // Write the temporary, pre-compaction ends directly into the offsets allocation. Every
         // value gets exactly one end before the length is exposed, so this avoids allocating and
         // zeroing a second values-sized array only to copy it into `offsets` afterward.
@@ -147,17 +119,36 @@ impl Compressor {
         // again until all ends are written and the length is updated.
         let ends_ptr = unsafe { offsets.as_mut_ptr().add(offsets_base) };
 
+        // Split the values into K contiguous ranges. Splitting by index rather than by byte
+        // count keeps every lane non-empty (there are at least K values here), and values within
+        // one array are usually of similar length, so the ranges come out close to balanced.
+        //
+        // Each lane also gets a disjoint slice of the output, sized to the worst case for its own
+        // values, so lanes never contend and the interleaved loop needs no output bounds check.
+        // `from_fn` walks the indices in order, which is what lets `cursor` accumulate here.
+        let mut cursor = 0usize;
         let mut lanes: [Lane; K] = std::array::from_fn(|i| {
-            let value = bounds[i];
-            let bytes = values[value];
+            let value_start = i * values.len() / K;
+            let value_end = (i + 1) * values.len() / K;
+            let out_base = cursor;
+            let bytes: usize = values[value_start..value_end]
+                .iter()
+                .map(|value| value.len())
+                .sum();
+            cursor += 2 * bytes;
+
+            let first = values[value_start];
             Lane {
-                in_ptr: bytes.as_ptr(),
+                in_ptr: first.as_ptr(),
                 // SAFETY: one past the end of the value's own allocation.
-                in_end: unsafe { bytes.as_ptr().add(bytes.len()) },
-                // SAFETY: `lane_out_base[lane]` is within the reserved spare capacity.
-                out_ptr: unsafe { spare_ptr.add(lane_out_base[i]) },
-                value,
-                value_end: bounds[i + 1],
+                in_end: unsafe { first.as_ptr().add(first.len()) },
+                // SAFETY: `out_base` is within the reserved spare capacity, which holds two bytes
+                // per byte of input across all lanes.
+                out_ptr: unsafe { spare_ptr.add(out_base) },
+                value: value_start,
+                value_start,
+                value_end,
+                out_base,
             }
         });
 
@@ -223,13 +214,10 @@ impl Compressor {
         // are separated by gaps. Slide each lane down onto the end of the previous one, and shift
         // its offsets by the same amount.
         let mut written = 0usize;
-        for lane in 0..K {
-            let lane_start = lane_out_base[lane];
-            let lane_len = if bounds[lane] == bounds[lane + 1] {
-                0
-            } else {
-                ends[bounds[lane + 1] - 1] as usize - lane_start
-            };
+        for lane in &lanes {
+            debug_assert!(lane.value_start < lane.value_end, "lanes are never empty");
+            let lane_start = lane.out_base;
+            let lane_len = ends[lane.value_end - 1] as usize - lane_start;
             if lane_start != written {
                 // SAFETY: both ranges are inside the reserved spare capacity, and the
                 // destination starts at or before the source, so the copy is well-formed even
@@ -237,7 +225,7 @@ impl Compressor {
                 unsafe { ptr::copy(spare_ptr.add(lane_start), spare_ptr.add(written), lane_len) };
             }
             let shift = (lane_start - written) as u64;
-            for end in &mut ends[bounds[lane]..bounds[lane + 1]] {
+            for end in &mut ends[lane.value_start..lane.value_end] {
                 *end = *end - shift + base as u64;
             }
             written += lane_len;
