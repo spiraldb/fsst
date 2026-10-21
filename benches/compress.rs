@@ -73,6 +73,19 @@ fn run_bench(name: &str, buf: &[u8], c: &mut Criterion) {
         b.iter(|| unsafe { compressor.compress_into(buf, buffer.spare_capacity_mut()) });
     });
 
+    // Row-wise bulk compression: values are compressed independently of one another, which is
+    // what lets `compress_bulk_into` run several cursors at once.
+    let lines: Vec<&[u8]> = buf.split(|&b| b == b'\n').collect();
+    let mut bulk_output: Vec<u8> = Vec::with_capacity(buf.len() * 2);
+    let mut bulk_offsets: Vec<u64> = Vec::with_capacity(lines.len());
+    group.bench_function("compress-bulk-into", |b| {
+        b.iter(|| {
+            bulk_output.clear();
+            bulk_offsets.clear();
+            compressor.compress_bulk_into(&lines, &mut bulk_output, &mut bulk_offsets);
+        });
+    });
+
     unsafe {
         let length = compressor.compress_into(buf, buffer.spare_capacity_mut());
         buffer.set_len(length);

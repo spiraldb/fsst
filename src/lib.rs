@@ -13,6 +13,7 @@ use std::fmt::{Debug, Formatter};
 use std::mem::MaybeUninit;
 
 mod builder;
+mod bulk;
 mod lossy_pht;
 
 pub use builder::*;
@@ -662,6 +663,54 @@ impl Compressor {
         }
     }
 
+    /// Branchless variant of [`Self::compress_word`] used when several independent cursors are
+    /// interleaved.
+    ///
+    /// Probing both lookup tables unconditionally avoids a branch misprediction flushing every
+    /// cursor currently in flight. A single cursor uses [`Self::compress_word`] instead, because
+    /// avoiding the unnecessary hash probe is faster on predictable inputs.
+    ///
+    /// # Safety
+    ///
+    /// `out_ptr` must never be NULL or otherwise point to invalid memory.
+    pub(crate) unsafe fn compress_word_branchless(
+        &self,
+        word: u64,
+        out_ptr: *mut u8,
+    ) -> (usize, usize) {
+        // Speculatively write the first byte of `word` at offset 1. This is necessary if it is an
+        // escape, and if it isn't, it will be overwritten anyway.
+        let first_byte = word as u8;
+        // SAFETY: out_ptr is not null.
+        unsafe { out_ptr.byte_add(1).write_unaligned(first_byte) };
+
+        // SAFETY: codes_two_byte has exactly 65536 entries and `word as u16` is always in
+        // [0, 65535].
+        let code_twobyte = unsafe { *self.codes_two_byte.get_unchecked(word as u16 as usize) };
+
+        // Issue the independent hash-table probe alongside the two-byte table load.
+        let entry = self.lossy_pht.lookup(word);
+
+        // `&` rather than `&&`: short-circuiting would reintroduce the branches this is removing.
+        let use_pht = (code_twobyte.code() >= self.has_suffix_code)
+            & (entry.code != Code::UNUSED)
+            & compare_masked_lenient(word, entry.symbol.to_u64(), entry.ignored_bits);
+
+        let (code, advance_in, advance_out) = if use_pht {
+            (entry.code.code(), entry.code.len() as usize, 1)
+        } else {
+            (
+                code_twobyte.code(),
+                code_twobyte.len() as usize,
+                1 + (code_twobyte.extended_code() >> 8) as usize,
+            )
+        };
+
+        // SAFETY: out_ptr is not null.
+        unsafe { std::ptr::write(out_ptr, code) };
+        (advance_in, advance_out)
+    }
+
     /// Compress many lines in bulk.
     pub fn compress_bulk(&self, lines: &Vec<&[u8]>) -> Vec<Vec<u8>> {
         let mut res = Vec::new();
@@ -962,6 +1011,18 @@ fn validate_symbol_order(symbol_lens: &[u8]) {
 #[inline]
 pub(crate) fn compare_masked(left: u64, right: u64, ignored_bits: u16) -> bool {
     let mask = u64::MAX >> ignored_bits;
+    (left & mask) == right
+}
+
+/// As [`compare_masked`], but also defined when `ignored_bits == 64`, which is the value stored
+/// in an unused hash slot.
+///
+/// The compression loop evaluates the comparison before it has established that the slot is in
+/// use, so the shift must not overflow. An unused slot is rejected by a separate check on the
+/// code, so the mask only has to be well-defined in that case, not meaningful.
+#[inline]
+pub(crate) fn compare_masked_lenient(left: u64, right: u64, ignored_bits: u16) -> bool {
+    let mask = u64::MAX.wrapping_shr(ignored_bits as u32);
     (left & mask) == right
 }
 
