@@ -3,24 +3,27 @@ tag-template: "$RESOLVED_VERSION"
 categories:
   - title: "⚠️ Breaks"
     labels:
-      - "changelog/break"
+      - "break"
+  - title: "🚧 Deprecation"
+    labels:
+      - "deprecation"
   - title: "✨ Features"
     labels:
-      - "changelog/feature"
+      - "feature"
   - title: "🚀 Performance"
     labels:
-      - "changelog/performance"
+      - "performance"
   - title: "🐛 Bug Fixes"
     collapse-after: 8
     labels:
-      - "changelog/fix"
+      - "fix"
   - title: "📖 Documentation"
     labels:
-      - "changelog/docs"
+      - "docs"
     collapse-after: 3
   - title: "🧰 Maintenance"
     labels:
-      - "changelog/chore"
+      - "chore"
     collapse-after: 3
 
 version-resolver:
@@ -31,12 +34,13 @@ version-resolver:
   minor:
     labels:
       # Any features or breaks will trigger a minor version bump (while we are 0.x)
-      - "changelog/feature"
-      - "changelog/break"
+      - "feature"
+      - "break"
   default: patch
 
 exclude-labels:
-  - "changelog/skip"
+  - "skip"
+  - "ci"
 
 template: |
   ## Changes
