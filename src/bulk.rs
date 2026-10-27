@@ -29,6 +29,13 @@ struct Lane {
 }
 
 impl Compressor {
+    /// A good default lane count for [`Self::compress_bulk_into`].
+    ///
+    /// Throughput usually climbs steeply from one to four cursors and then falls back as the
+    /// working set of each iteration outgrows the register file. Measure on the target machine
+    /// to find the best value.
+    pub const DEFAULT_BULK_LANES: usize = 4;
+
     /// Compress many values into a single contiguous buffer.
     ///
     /// The compressed bytes of every value are appended to `output`, and the end offset of every
@@ -41,10 +48,7 @@ impl Compressor {
     /// so any one of them can be decompressed on its own from that range.
     ///
     /// `LANES` is the number of independent cursors to interleave. It changes only the speed,
-    /// never the output. Throughput usually climbs steeply from one to four cursors and then
-    /// falls back as the working set of each iteration outgrows the register file, so four is a
-    /// good start. Measure on the target machine to find the best value. `LANES == 0` is
-    /// rejected when the function is instantiated.
+    /// never the output. [`Self::DEFAULT_BULK_LANES`] is a good start.
     ///
     /// ```
     /// use fsst::{Compressor, CompressorBuilder, Symbol};
@@ -58,7 +62,7 @@ impl Compressor {
     /// let values: &[&[u8]] = &[b"hello", b"hellohello"];
     /// let mut output = Vec::new();
     /// let mut offsets = Vec::new();
-    /// compressor.compress_bulk_into::<4>(values, &mut output, &mut offsets);
+    /// compressor.compress_bulk_into::<{ Compressor::DEFAULT_BULK_LANES }>(values, &mut output, &mut offsets);
     ///
     /// // "hello" is a single code, so the first value is one byte and the second is two.
     /// assert_eq!(offsets, vec![1, 3]);
@@ -66,6 +70,18 @@ impl Compressor {
     /// let decompressor = compressor.decompressor();
     /// assert_eq!(decompressor.decompress(&output[..1]), b"hello");
     /// assert_eq!(decompressor.decompress(&output[1..3]), b"hellohello");
+    /// ```
+    ///
+    /// # Compile errors
+    ///
+    /// `LANES` must be at least one. The compiler rejects `LANES == 0` when it instantiates the
+    /// function, so `cargo build` reports the error but `cargo check` does not.
+    ///
+    /// ```compile_fail
+    /// use fsst::CompressorBuilder;
+    ///
+    /// let compressor = CompressorBuilder::new().build();
+    /// compressor.compress_bulk_into::<0>(&[b"hello"], &mut Vec::new(), &mut Vec::new());
     /// ```
     pub fn compress_bulk_into<const LANES: usize>(
         &self,

@@ -19,6 +19,9 @@ static ART_OF_WAR: &str = include_str!("./fixtures/art_of_war.txt");
 /// corpus rather than being dominated by fixed setup. The unsafe code paths under test are hit
 /// just as thoroughly by a small corpus, so the size-sensitive tests below scale their inputs
 /// down under miri.
+/// Lane count of the bulk tests. The value counts in the tests below are chosen relative to it.
+const LANES: usize = Compressor::DEFAULT_BULK_LANES;
+
 const fn scaled(full: usize, under_miri: usize) -> usize {
     if cfg!(miri) { under_miri } else { full }
 }
@@ -265,7 +268,7 @@ fn test_zero_word_does_not_match_unused_hash_slot() {
 fn check_bulk(compressor: &Compressor, values: &[&[u8]], label: &str) {
     let mut output = Vec::new();
     let mut offsets = Vec::new();
-    compressor.compress_bulk_into::<4>(values, &mut output, &mut offsets);
+    compressor.compress_bulk_into::<LANES>(values, &mut output, &mut offsets);
 
     assert_eq!(offsets.len(), values.len(), "{label}: one offset per value");
     let mut start = 0usize;
@@ -298,7 +301,7 @@ fn test_compress_bulk_into_matches_compress() {
 
     // Fewer values than cursors, and counts either side of the cursor count, exercise the
     // serial fallback and the drain that runs once the first cursor runs out of values.
-    for n in [0usize, 1, 2, 3, 4, 5, 6, 7, 8, 9, 17] {
+    for n in (0..=2 * LANES + 1).chain([4 * LANES + 1]) {
         check_bulk(
             &compressor,
             &lines[..n.min(lines.len())],
@@ -340,13 +343,13 @@ fn test_compress_bulk_into_appends() {
 
     let mut fresh_output = Vec::new();
     let mut fresh_offsets = Vec::new();
-    compressor.compress_bulk_into::<4>(&lines, &mut fresh_output, &mut fresh_offsets);
+    compressor.compress_bulk_into::<LANES>(&lines, &mut fresh_output, &mut fresh_offsets);
 
     // Existing contents are preserved, and the offsets returned are absolute indices into the
     // output, so they are shifted by whatever was already there.
     let mut output = vec![0xAA; 5];
     let mut offsets = vec![u64::MAX; 2];
-    compressor.compress_bulk_into::<4>(&lines, &mut output, &mut offsets);
+    compressor.compress_bulk_into::<LANES>(&lines, &mut output, &mut offsets);
 
     assert_eq!(&output[..5], &[0xAA; 5]);
     assert_eq!(&offsets[..2], &[u64::MAX; 2]);
@@ -367,12 +370,17 @@ fn test_compress_bulk_into_cursor_counts_agree() {
     compressor.compress_bulk_into::<1>(&lines, &mut expected_output, &mut expected_offsets);
 
     // The cursor count is a scheduling choice; it must not change a single output byte.
-    fn compare<const K: usize>(c: &Compressor, lines: &[&[u8]], output: &[u8], offsets: &[u64]) {
+    fn compare<const LANES: usize>(
+        c: &Compressor,
+        lines: &[&[u8]],
+        output: &[u8],
+        offsets: &[u64],
+    ) {
         let mut got_output = Vec::new();
         let mut got_offsets = Vec::new();
-        c.compress_bulk_into::<K>(lines, &mut got_output, &mut got_offsets);
-        assert_eq!(got_output, output, "K={K} output");
-        assert_eq!(got_offsets, offsets, "K={K} offsets");
+        c.compress_bulk_into::<LANES>(lines, &mut got_output, &mut got_offsets);
+        assert_eq!(got_output, output, "LANES={LANES} output");
+        assert_eq!(got_offsets, offsets, "LANES={LANES} offsets");
     }
     compare::<2>(&compressor, &lines, &expected_output, &expected_offsets);
     compare::<3>(&compressor, &lines, &expected_output, &expected_offsets);
@@ -396,7 +404,7 @@ fn test_compress_bulk_into_all_escape_fills_every_slice() {
 
     let mut output = Vec::new();
     let mut offsets = Vec::new();
-    compressor.compress_bulk_into::<4>(&values, &mut output, &mut offsets);
+    compressor.compress_bulk_into::<LANES>(&values, &mut output, &mut offsets);
 
     let mut start = 0usize;
     for (i, value) in values.iter().enumerate() {
