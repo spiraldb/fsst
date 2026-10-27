@@ -86,7 +86,7 @@ jobs:
 
       - name: Build benchmarks
         env:
-          RUSTFLAGS: "-C target-feature=+avx2"
+          RUSTFLAGS: "-C target-cpu=native -C force-frame-pointers=yes"
         run: |
           cargo codspeed build --profile bench -m walltime
 
