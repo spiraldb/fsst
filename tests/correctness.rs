@@ -265,7 +265,7 @@ fn test_zero_word_does_not_match_unused_hash_slot() {
 fn check_bulk(compressor: &Compressor, values: &[&[u8]], label: &str) {
     let mut output = Vec::new();
     let mut offsets = Vec::new();
-    compressor.compress_bulk_into(values, &mut output, &mut offsets);
+    compressor.compress_bulk_into::<4>(values, &mut output, &mut offsets);
 
     assert_eq!(offsets.len(), values.len(), "{label}: one offset per value");
     let mut start = 0usize;
@@ -340,13 +340,13 @@ fn test_compress_bulk_into_appends() {
 
     let mut fresh_output = Vec::new();
     let mut fresh_offsets = Vec::new();
-    compressor.compress_bulk_into(&lines, &mut fresh_output, &mut fresh_offsets);
+    compressor.compress_bulk_into::<4>(&lines, &mut fresh_output, &mut fresh_offsets);
 
     // Existing contents are preserved, and the offsets returned are absolute indices into the
     // output, so they are shifted by whatever was already there.
     let mut output = vec![0xAA; 5];
     let mut offsets = vec![u64::MAX; 2];
-    compressor.compress_bulk_into(&lines, &mut output, &mut offsets);
+    compressor.compress_bulk_into::<4>(&lines, &mut output, &mut offsets);
 
     assert_eq!(&output[..5], &[0xAA; 5]);
     assert_eq!(&offsets[..2], &[u64::MAX; 2]);
@@ -364,13 +364,13 @@ fn test_compress_bulk_into_cursor_counts_agree() {
 
     let mut expected_output = Vec::new();
     let mut expected_offsets = Vec::new();
-    compressor.compress_bulk_lanes::<1>(&lines, &mut expected_output, &mut expected_offsets);
+    compressor.compress_bulk_into::<1>(&lines, &mut expected_output, &mut expected_offsets);
 
     // The cursor count is a scheduling choice; it must not change a single output byte.
     fn compare<const K: usize>(c: &Compressor, lines: &[&[u8]], output: &[u8], offsets: &[u64]) {
         let mut got_output = Vec::new();
         let mut got_offsets = Vec::new();
-        c.compress_bulk_lanes::<K>(lines, &mut got_output, &mut got_offsets);
+        c.compress_bulk_into::<K>(lines, &mut got_output, &mut got_offsets);
         assert_eq!(got_output, output, "K={K} output");
         assert_eq!(got_offsets, offsets, "K={K} offsets");
     }
@@ -396,7 +396,7 @@ fn test_compress_bulk_into_all_escape_fills_every_slice() {
 
     let mut output = Vec::new();
     let mut offsets = Vec::new();
-    compressor.compress_bulk_into(&values, &mut output, &mut offsets);
+    compressor.compress_bulk_into::<4>(&values, &mut output, &mut offsets);
 
     let mut start = 0usize;
     for (i, value) in values.iter().enumerate() {

@@ -105,7 +105,7 @@ fn run_bench(name: &str, buf: &[u8], c: &mut Criterion) {
         b.iter(|| {
             bulk_output.clear();
             bulk_offsets.clear();
-            compressor.compress_bulk_into(&lines, &mut bulk_output, &mut bulk_offsets);
+            compressor.compress_bulk_into::<4>(&lines, &mut bulk_output, &mut bulk_offsets);
         });
     });
 

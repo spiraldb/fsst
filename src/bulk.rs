@@ -10,12 +10,6 @@ use std::ptr;
 
 use crate::{Compressor, advance_8byte_word};
 
-/// Number of independent cursors [`Compressor::compress_bulk_into`] interleaves.
-///
-/// Throughput climbs steeply from one to four cursors and then falls back as the working set of
-/// each iteration outgrows the register file.
-const LANES: usize = 4;
-
 /// State of a single cursor.
 struct Lane {
     /// Next input byte to consume.
@@ -46,6 +40,12 @@ impl Compressor {
     /// Each value is compressed independently, exactly as [`Self::compress`] would compress it,
     /// so any one of them can be decompressed on its own from that range.
     ///
+    /// `LANES` is the number of independent cursors to interleave. It changes only the speed,
+    /// never the output. Throughput usually climbs steeply from one to four cursors and then
+    /// falls back as the working set of each iteration outgrows the register file, so four is a
+    /// good start. Measure on the target machine to find the best value. `LANES == 0` is
+    /// rejected when the function is instantiated.
+    ///
     /// ```
     /// use fsst::{Compressor, CompressorBuilder, Symbol};
     ///
@@ -58,7 +58,7 @@ impl Compressor {
     /// let values: &[&[u8]] = &[b"hello", b"hellohello"];
     /// let mut output = Vec::new();
     /// let mut offsets = Vec::new();
-    /// compressor.compress_bulk_into(values, &mut output, &mut offsets);
+    /// compressor.compress_bulk_into::<4>(values, &mut output, &mut offsets);
     ///
     /// // "hello" is a single code, so the first value is one byte and the second is two.
     /// assert_eq!(offsets, vec![1, 3]);
@@ -67,28 +67,14 @@ impl Compressor {
     /// assert_eq!(decompressor.decompress(&output[..1]), b"hello");
     /// assert_eq!(decompressor.decompress(&output[1..3]), b"hellohello");
     /// ```
-    pub fn compress_bulk_into(
-        &self,
-        values: &[&[u8]],
-        output: &mut Vec<u8>,
-        offsets: &mut Vec<u64>,
-    ) {
-        self.compress_bulk_lanes::<LANES>(values, output, offsets)
-    }
-
-    /// [`Self::compress_bulk_into`] with the cursor count exposed, so the best value for a given
-    /// machine can be measured rather than assumed.
-    ///
-    /// `K` must be at least one; `K == 0` is rejected when the function is instantiated.
-    #[doc(hidden)]
-    pub fn compress_bulk_lanes<const K: usize>(
+    pub fn compress_bulk_into<const LANES: usize>(
         &self,
         values: &[&[u8]],
         output: &mut Vec<u8>,
         offsets: &mut Vec<u64>,
     ) {
         // With no cursors the interleaved loop below would never make progress.
-        const { assert!(K > 0, "at least one cursor is required") };
+        const { assert!(LANES > 0, "at least one cursor is required") };
         if values.is_empty() {
             return;
         }
@@ -103,7 +89,7 @@ impl Compressor {
         let spare = output.spare_capacity_mut();
         let spare_ptr: *mut u8 = spare.as_mut_ptr().cast();
 
-        if values.len() < K {
+        if values.len() < LANES {
             // SAFETY: `output` was just reserved to two bytes per byte of input.
             let written = unsafe { self.compress_bulk_serial(values, spare_ptr, base, offsets) };
             // SAFETY: bytes `base..base + written` of the allocation were initialized above.
@@ -119,17 +105,18 @@ impl Compressor {
         // again until all ends are written and the length is updated.
         let ends_ptr = unsafe { offsets.as_mut_ptr().add(offsets_base) };
 
-        // Split the values into K contiguous ranges. Splitting by index rather than by byte
-        // count keeps every lane non-empty (there are at least K values here), and values within
-        // one array are usually of similar length, so the ranges come out close to balanced.
+        // Split the values into LANES contiguous ranges. Splitting by index rather than by
+        // byte count keeps every lane non-empty (there are at least LANES values here), and
+        // values within one array are usually of similar length, so the ranges come out close
+        // to balanced.
         //
         // Each lane also gets a disjoint slice of the output, sized to the worst case for its own
         // values, so lanes never contend and the interleaved loop needs no output bounds check.
         // `from_fn` walks the indices in order, which is what lets `cursor` accumulate here.
         let mut cursor = 0usize;
-        let mut lanes: [Lane; K] = std::array::from_fn(|i| {
-            let value_start = i * values.len() / K;
-            let value_end = (i + 1) * values.len() / K;
+        let mut lanes: [Lane; LANES] = std::array::from_fn(|i| {
+            let value_start = i * values.len() / LANES;
+            let value_end = (i + 1) * values.len() / LANES;
             let out_base = cursor;
             let bytes: usize = values[value_start..value_end]
                 .iter()
@@ -156,7 +143,7 @@ impl Compressor {
             // Bring every lane up to at least a full word of input, finishing values and moving
             // on to the next one as needed. This is the only branch in the loop that depends on
             // the data, and it is taken about once per value rather than once per iteration.
-            for lane in 0..K {
+            for lane in 0..LANES {
                 while (lanes[lane].in_ptr as usize) + 8 > lanes[lane].in_end as usize {
                     // SAFETY: the lane's pointers are within its own value and output slice.
                     unsafe { self.finish_value(&mut lanes[lane], values, spare_ptr, ends_ptr) };
@@ -178,7 +165,7 @@ impl Compressor {
                 // and the lane's output slice has room for two bytes per input byte consumed.
                 unsafe {
                     let word = ptr::read_unaligned(lane.in_ptr as *const u64);
-                    let (advance_in, advance_out) = if K == 1 {
+                    let (advance_in, advance_out) = if LANES == 1 {
                         self.compress_word(word, lane.out_ptr)
                     } else {
                         self.compress_word_branchless(word, lane.out_ptr)
@@ -190,7 +177,7 @@ impl Compressor {
         }
 
         // Drain whatever is left in each lane once the first one has run out of values.
-        for lane in 0..K {
+        for lane in 0..LANES {
             while lanes[lane].value < lanes[lane].value_end {
                 // SAFETY: as above.
                 unsafe { self.finish_value(&mut lanes[lane], values, spare_ptr, ends_ptr) };
@@ -205,8 +192,8 @@ impl Compressor {
         }
 
         // Every value's end has now been initialized.
-        // SAFETY: each of the K non-empty lane ranges covers a disjoint part of `values`, and the
-        // loops above finish every value in every range exactly once.
+        // SAFETY: each of the LANES non-empty lane ranges covers a disjoint part of `values`, and
+        // the loops above finish every value in every range exactly once.
         unsafe { offsets.set_len(offsets_base + values.len()) };
         let ends = &mut offsets[offsets_base..];
 
