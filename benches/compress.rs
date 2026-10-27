@@ -73,6 +73,30 @@ fn run_bench(name: &str, buf: &[u8], c: &mut Criterion) {
         b.iter(|| unsafe { compressor.compress_into(buf, buffer.spare_capacity_mut()) });
     });
 
+    // Row-wise compression: each line is compressed on its own, and the end offset of each
+    // value is recorded. This is the shape of a string column, and the baseline for bulk APIs.
+    let lines: Vec<&[u8]> = buf.split(|&b| b == b'\n').collect();
+    let mut output: Vec<u8> = Vec::with_capacity(buf.len() * 2);
+    let mut offsets: Vec<u64> = Vec::with_capacity(lines.len());
+
+    group.bench_function("compress-rows", |b| {
+        b.iter(|| {
+            output.clear();
+            offsets.clear();
+
+            for line in &lines {
+                // SAFETY: a value compresses to at most twice its length, and the lines together
+                // are shorter than `buf`, so the capacity of `output` is sufficient.
+                unsafe {
+                    let length = compressor.compress_into(line, output.spare_capacity_mut());
+                    output.set_len(output.len() + length);
+                }
+
+                offsets.push(output.len() as u64);
+            }
+        });
+    });
+
     unsafe {
         let length = compressor.compress_into(buf, buffer.spare_capacity_mut());
         buffer.set_len(length);
