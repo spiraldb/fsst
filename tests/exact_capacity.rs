@@ -72,7 +72,7 @@ mod property_tests {
         (symbols, lengths)
     }
 
-    #[derive(Clone, Copy, Debug, hegel::PrettyPrintable)]
+    #[derive(Clone, Copy, Debug)]
     enum Token {
         Symbol(u8),
         Escape(u8),
