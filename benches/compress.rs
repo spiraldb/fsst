@@ -10,7 +10,8 @@ use std::{
     path::Path,
 };
 
-use criterion::{Criterion, Throughput, criterion_group, criterion_main};
+use criterion::measurement::WallTime;
+use criterion::{BenchmarkGroup, Criterion, Throughput, criterion_group, criterion_main};
 
 use curl::easy::Easy;
 use fsst::Compressor;
@@ -56,6 +57,24 @@ fn download_dataset(url: &str, path: impl AsRef<Path>) -> Result<(), Box<dyn Err
     Ok(())
 }
 
+fn bench_bulk<const LANES: usize>(
+    group: &mut BenchmarkGroup<'_, WallTime>,
+    compressor: &Compressor,
+    lines: &[&[u8]],
+    total_len: usize,
+) {
+    let mut output: Vec<u8> = Vec::with_capacity(total_len * 2);
+    let mut offsets: Vec<u64> = Vec::with_capacity(lines.len());
+
+    group.bench_function(format!("compress-bulk-into/{LANES}"), |b| {
+        b.iter(|| {
+            output.clear();
+            offsets.clear();
+            compressor.compress_bulk_into::<LANES>(lines, &mut output, &mut offsets);
+        });
+    });
+}
+
 fn run_bench(name: &str, buf: &[u8], c: &mut Criterion) {
     let mut group = c.benchmark_group(name);
 
@@ -96,6 +115,12 @@ fn run_bench(name: &str, buf: &[u8], c: &mut Criterion) {
             }
         });
     });
+
+    // Row-wise bulk compression: values are compressed independently of one another, which is
+    // what lets `compress_bulk_into` run several cursors at once. The best lane count depends on
+    // the machine, so measure the two likely candidates. `compress-rows` is the one-lane baseline.
+    bench_bulk::<4>(&mut group, &compressor, &lines, buf.len());
+    bench_bulk::<8>(&mut group, &compressor, &lines, buf.len());
 
     unsafe {
         let length = compressor.compress_into(buf, buffer.spare_capacity_mut());
