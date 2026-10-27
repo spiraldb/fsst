@@ -73,7 +73,7 @@ jobs:
     name: Benchmark with Codspeed (Walltime)
     runs-on:
       - runs-on=${{ github.run_id }}
-      - family=c6id.8xlarge
+      - family=c8id.8xlarge
       - image=ubuntu24-full-x64
       - tag=bench-codspeed-walltime
     steps:
