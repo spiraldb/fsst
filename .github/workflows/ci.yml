@@ -63,6 +63,8 @@ jobs:
           cargo codspeed build --profile bench -m simulation
 
       - name: Run benchmarks - Instrumentation
+        env:
+          CODSPEED_PROCESS_ISOLATION: "false"
         uses: CodSpeedHQ/action@78102a468f96d8e0ccb92d0ec49425753fc42062 # v5
         with:
           run: cargo codspeed run
@@ -91,6 +93,8 @@ jobs:
           cargo codspeed build --profile bench -m walltime
 
       - name: Run benchmarks - Walltime
+        env:
+          CODSPEED_PROCESS_ISOLATION: "false"
         uses: CodSpeedHQ/action@78102a468f96d8e0ccb92d0ec49425753fc42062 # v5
         with:
           run: cargo codspeed run
