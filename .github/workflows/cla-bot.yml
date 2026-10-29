@@ -1,0 +1,38 @@
+name: CLA for bots
+
+# CLA Assistant does not report a status on pull requests that contain only bot commits.
+# This workflow reports the required license/cla status for Renovate pull requests.
+# CLA Assistant continues to examine all pull requests that contain human commits.
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  pull-requests: read
+  statuses: write
+
+jobs:
+  cla:
+    name: CLA for bots
+    if: github.event.pull_request.user.login == 'renovate[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report license/cla status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          authors=$(gh api --paginate "repos/$REPO/pulls/$PR/commits" --jq '.[].author.login // "unknown"' | sort -u)
+
+          if [ "$authors" != "renovate[bot]" ]; then
+            echo "Pull request has commits from other authors. CLA Assistant examines them."
+            exit 0
+          fi
+
+          gh api "repos/$REPO/statuses/$SHA" \
+            -f state=success \
+            -f context=license/cla \
+            -f description="All commits are from renovate[bot]. A CLA is not necessary."
