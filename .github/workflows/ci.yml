@@ -64,6 +64,8 @@ jobs:
 
       - name: Run benchmarks - Instrumentation
         uses: CodSpeedHQ/action@af75f77f17a054769abefaa42fe8dc2975469b5f # v5
+        env:
+          CODSPEED_PROCESS_ISOLATION: "false"
         with:
           run: cargo codspeed run
           token: ${{ secrets.CODSPEED_TOKEN }}
@@ -92,6 +94,8 @@ jobs:
 
       - name: Run benchmarks - Walltime
         uses: CodSpeedHQ/action@af75f77f17a054769abefaa42fe8dc2975469b5f # v5
+        env:
+          CODSPEED_PROCESS_ISOLATION: "false"
         with:
           run: cargo codspeed run
           token: ${{ secrets.CODSPEED_TOKEN }}
