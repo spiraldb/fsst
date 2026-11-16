@@ -363,9 +363,7 @@ impl CompressorBuilder {
         }
 
         // Reset len histogram
-        for i in 0..=7 {
-            self.len_histogram[i] = 0;
-        }
+        self.len_histogram.fill(0);
 
         self.n_symbols = 0;
     }
@@ -469,14 +467,13 @@ impl CompressorBuilder {
 
         // Rewrite the codes_one_byte table to point at the new code values.
         // Replace pseudocodes with escapes.
-        for byte in 0..=255 {
-            let one_byte = self.codes_one_byte[byte];
+        for one_byte in self.codes_one_byte.iter_mut().take(256) {
             if one_byte.extended_code() >= FSST_CODE_BASE {
                 let new_code = new_codes[one_byte.code() as usize];
-                self.codes_one_byte[byte] = Code::new_symbol(new_code, 1);
+                *one_byte = Code::new_symbol(new_code, 1);
             } else {
                 // After finalize: codes_one_byte contains the unused value
-                self.codes_one_byte[byte] = Code::UNUSED;
+                *one_byte = Code::UNUSED;
             }
         }
 
