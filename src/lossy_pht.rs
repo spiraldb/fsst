@@ -16,7 +16,8 @@ pub const HASH_TABLE_SIZE: usize = 1 << 11;
 /// `TableEntry` is based on the `Symbol` class outlined in Algorithm 4 of the FSST paper. See
 /// the module documentation for a link to the paper.
 #[derive(Clone, Debug)]
-#[repr(C)]
+// `align(8)` keeps the entry 16 bytes on targets where `u64` is only 4-aligned (e.g. i686).
+#[repr(C, align(8))]
 pub(crate) struct TableEntry {
     /// Symbol, piece of a string, 8 bytes or fewer.
     pub(crate) symbol: Symbol,
