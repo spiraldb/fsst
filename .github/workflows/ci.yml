@@ -10,6 +10,11 @@ permissions:
   actions: read
   contents: read
 
+concurrency:
+  # Cancel superseded runs of the same PR; never cancel runs on develop.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   build:
     name: Build
@@ -53,8 +58,9 @@ jobs:
       - uses: ./.github/actions/setup-rust
 
       - name: Install Codspeed
-        shell: bash
-        run: cargo install --force cargo-codspeed --locked
+        uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2
+        with:
+          tool: cargo-codspeed
 
       - name: Build benchmarks
         env:
@@ -72,31 +78,38 @@ jobs:
           mode: simulation
 
   bench-codspeed-walltime:
-    name: Benchmark with Codspeed (Walltime)
+    name: Benchmark with Codspeed (Walltime, ${{ matrix.bench }})
+    # One shard per bench target, so the walltime suites run on separate machines at the same
+    # time instead of one after another. CodSpeed merges the shards' results.
+    strategy:
+      fail-fast: false
+      matrix:
+        bench: [compress, micro]
     runs-on:
       - runs-on=${{ github.run_id }}
       - family=c7i.8xlarge
       - image=ubuntu24-full-x64
-      - tag=bench-codspeed-walltime
+      - tag=bench-codspeed-walltime-${{ matrix.bench }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: ./.github/actions/setup-rust
 
       - name: Install Codspeed
-        shell: bash
-        run: cargo install --force cargo-codspeed --locked
+        uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2
+        with:
+          tool: cargo-codspeed
 
       - name: Build benchmarks
         env:
           RUSTFLAGS: "-C target-cpu=native -C force-frame-pointers=yes"
         run: |
-          cargo codspeed build --profile bench -m walltime
+          cargo codspeed build --profile bench -m walltime --bench ${{ matrix.bench }}
 
       - name: Run benchmarks - Walltime
         uses: CodSpeedHQ/action@af75f77f17a054769abefaa42fe8dc2975469b5f # v5
         env:
           CODSPEED_PROCESS_ISOLATION: "false"
         with:
-          run: cargo codspeed run
+          run: cargo codspeed run --bench ${{ matrix.bench }}
           token: ${{ secrets.CODSPEED_TOKEN }}
           mode: walltime
