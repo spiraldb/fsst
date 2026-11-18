@@ -25,10 +25,9 @@ jobs:
       # write permission is required to create a github release
       contents: write
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: release-drafter/release-drafter@d1a19e60e81a7e650d00a7de9277f87e439117ea # v7
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           commitish: ${{ github.ref_name }}
           prerelease: ${{ github.event_name == 'workflow_dispatch' }}
